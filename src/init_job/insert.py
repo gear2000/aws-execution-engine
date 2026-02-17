@@ -30,6 +30,7 @@ def insert_orders(
         # Build git b64 if using git source
         git_b64 = None
         if not order.s3_location:
+            commit = order.commit_hash or job.commit_hash
             git_data = {
                 "repo": order.git_repo or job.git_repo,
                 "token_location": job.git_token_location,
@@ -37,6 +38,8 @@ def insert_orders(
             }
             if job.git_ssh_key_location:
                 git_data["ssh_key_location"] = job.git_ssh_key_location
+            if commit:
+                git_data["commit_hash"] = commit
             git_b64 = base64.b64encode(json.dumps(git_data).encode()).decode()
 
         s3_location = f"s3://{internal_bucket}/tmp/exec/{run_id}/{order_num}/exec.zip"

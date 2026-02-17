@@ -81,6 +81,20 @@ class TestOrder:
         assert order.order_name == "test-order"
         assert order.use_lambda is True
 
+    def test_commit_hash_field(self):
+        order = Order(cmds=["echo"], timeout=300, commit_hash="abc123")
+        assert order.commit_hash == "abc123"
+
+    def test_commit_hash_in_to_dict(self):
+        order = Order(cmds=["echo"], timeout=300, commit_hash="abc123")
+        d = order.to_dict()
+        assert d["commit_hash"] == "abc123"
+
+    def test_commit_hash_excluded_when_none(self):
+        order = Order(cmds=["echo"], timeout=300)
+        d = order.to_dict()
+        assert "commit_hash" not in d
+
     def test_to_dict_from_dict_roundtrip(self):
         order = Order(
             cmds=["cmd1"],
@@ -153,6 +167,37 @@ class TestJob:
         assert restored.username == job.username
         assert len(restored.orders) == len(job.orders)
         assert restored.orders[0].order_name == job.orders[0].order_name
+
+    def test_commit_hash_field(self):
+        job = Job(
+            git_repo="org/repo",
+            git_token_location="token",
+            username="user",
+            orders=[],
+            commit_hash="abc123",
+        )
+        assert job.commit_hash == "abc123"
+
+    def test_commit_hash_b64_roundtrip(self):
+        job = Job(
+            git_repo="org/repo",
+            git_token_location="token",
+            username="user",
+            orders=[Order(cmds=["echo"], timeout=300)],
+            commit_hash="abc123",
+        )
+        restored = Job.from_b64(job.to_b64())
+        assert restored.commit_hash == "abc123"
+
+    def test_commit_hash_excluded_when_none(self):
+        job = Job(
+            git_repo="org/repo",
+            git_token_location="token",
+            username="user",
+            orders=[],
+        )
+        d = job.to_dict()
+        assert "commit_hash" not in d
 
     def test_default_flow_label(self):
         job = Job(
