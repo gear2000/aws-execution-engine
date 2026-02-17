@@ -8,11 +8,11 @@ locals {
   }
 }
 
-# --- process_webhook (init_job) ---
+# --- init_job ---
 
-resource "aws_lambda_function" "process_webhook" {
-  function_name = "iac-ci-process-webhook"
-  role          = aws_iam_role.process_webhook.arn
+resource "aws_lambda_function" "init_job" {
+  function_name = "iac-ci-init-job"
+  role          = aws_iam_role.init_job.arn
   package_type  = "Image"
   image_uri     = local.image_uri
   timeout       = 300
@@ -27,8 +27,8 @@ resource "aws_lambda_function" "process_webhook" {
   }
 }
 
-resource "aws_lambda_function_url" "process_webhook" {
-  function_name      = aws_lambda_function.process_webhook.function_name
+resource "aws_lambda_function_url" "init_job" {
+  function_name      = aws_lambda_function.init_job.function_name
   authorization_type = "NONE"
 }
 

@@ -106,7 +106,7 @@ Test 1: API Gateway health
   expect: 400 (no payload)
 
 Test 2: Lambda invoke
-  aws lambda invoke process_webhook --payload <minimal_job>
+  aws lambda invoke init_job --payload <minimal_job>
   expect: 200 + run_id
 
 Test 3: DynamoDB tables exist

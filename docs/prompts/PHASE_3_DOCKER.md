@@ -27,7 +27,7 @@ Verify the image builds:
   docker build -f docker/Dockerfile -t iac-ci .
 
 Verify each entrypoint resolves (expect import to succeed, not a runtime crash):
-  docker run --entrypoint python iac-ci -c "from src.process_webhook.handler import handler; print('OK')"
+  docker run --entrypoint python iac-ci -c "from src.init_job.handler import handler; print('OK')"
   docker run --entrypoint python iac-ci -c "from src.orchestrator.handler import handler; print('OK')"
   docker run --entrypoint python iac-ci -c "from src.watchdog_check.handler import handler; print('OK')"
   docker run --entrypoint python iac-ci -c "from src.worker.handler import handler; print('OK')"
@@ -47,10 +47,10 @@ Add a new job that depends on phase2-lambdas:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -f docker/Dockerfile -t iac-ci .
-      - name: Verify process_webhook entrypoint
+      - name: Verify init_job entrypoint
         run: |
           docker run --entrypoint python iac-ci -c \
-            "from src.process_webhook.handler import handler; print('OK')"
+            "from src.init_job.handler import handler; print('OK')"
       - name: Verify orchestrator entrypoint
         run: |
           docker run --entrypoint python iac-ci -c \

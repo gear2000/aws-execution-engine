@@ -1,6 +1,6 @@
 # Variables Reference
 
-Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `process_webhook` Lambda.
+Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `init_job` Lambda.
 
 ---
 
@@ -85,7 +85,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
 }
 ```
 
-This payload is base64-encoded before being sent to the `process_webhook` Lambda.
+This payload is base64-encoded before being sent to the `init_job` Lambda.
 
 ---
 

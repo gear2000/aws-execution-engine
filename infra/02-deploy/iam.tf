@@ -24,17 +24,17 @@ data "aws_iam_policy_document" "lambda_logs" {
 }
 
 # ============================================================
-# process_webhook
+# init_job
 # ============================================================
 
-resource "aws_iam_role" "process_webhook" {
-  name               = "iac-ci-process-webhook"
+resource "aws_iam_role" "init_job" {
+  name               = "iac-ci-init-job"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-resource "aws_iam_role_policy" "process_webhook" {
-  name = "iac-ci-process-webhook"
-  role = aws_iam_role.process_webhook.id
+resource "aws_iam_role_policy" "init_job" {
+  name = "iac-ci-init-job"
+  role = aws_iam_role.init_job.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -72,9 +72,9 @@ resource "aws_iam_role_policy" "process_webhook" {
   })
 }
 
-resource "aws_iam_role_policy" "process_webhook_logs" {
+resource "aws_iam_role_policy" "init_job_logs" {
   name   = "logs"
-  role   = aws_iam_role.process_webhook.id
+  role   = aws_iam_role.init_job.id
   policy = data.aws_iam_policy_document.lambda_logs.json
 }
 

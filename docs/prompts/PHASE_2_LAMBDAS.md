@@ -4,45 +4,45 @@ Build all Lambda function handlers. Depends on Phase 1 (common libraries) being 
 
 ---
 
-## P2.1 — process_webhook
+## P2.1 — init_job
 
 ```
 Read CLAUDE.md, docs/ARCHITECTURE.md (Part 1 section), docs/VARIABLES.md, and all files in src/common/.
 
-Create src/process_webhook/__init__.py (empty).
+Create src/init_job/__init__.py (empty).
 
-Create src/process_webhook/handler.py:
+Create src/init_job/handler.py:
 - Lambda entrypoint that accepts API Gateway, SNS, direct invoke, and Lambda URL events
 - Normalize event format regardless of trigger source
 - Extract job_parameters_b64 from event body
 - Call process_job_and_insert_orders()
 - Return HTTP response with run_id, trace_id, flow_id, done_endpt, pr_search_tag
 
-Create src/process_webhook/validate.py:
+Create src/init_job/validate.py:
 - validate_orders(job): iterate all orders, check cmds non-empty, timeout present, has code source (s3_location or git_repo+git_token_location). Return list of errors or empty list.
 - Fail fast on first invalid order.
 
-Create src/process_webhook/repackage.py:
+Create src/init_job/repackage.py:
 - repackage_orders(job, run_id, trace_id): for each order, fetch code (git clone or S3 download), fetch SSM/secrets manager values, generate presigned callback URL, call sops.repackage_order(), re-zip. Return list of repackaged order paths + callback URLs.
 
-Create src/process_webhook/upload.py:
+Create src/init_job/upload.py:
 - upload_orders(repackaged_orders, run_id, bucket): upload each exec.zip to S3. Optional stripped copy.
 
-Create src/process_webhook/insert.py:
+Create src/init_job/insert.py:
 - insert_orders(job, run_id, flow_id, trace_id, repackaged_orders): insert each order into DynamoDB orders table with all fields. Write initial job-level order_event (_job:started).
 
-Create src/process_webhook/pr_comment.py:
+Create src/init_job/pr_comment.py:
 - init_pr_comment(job, run_id, flow_id, search_tag): use VcsPrHelper to post initial PR comment with order summary table.
 
 The handler orchestrates: generate trace_id/run_id/flow_id → validate → repackage → upload → insert → pr_comment → write init trigger to S3 → return response.
 ```
 
-## P2.2 — Unit Tests for process_webhook
+## P2.2 — Unit Tests for init_job
 
 ```
-Read CLAUDE.md and all files in src/process_webhook/ and src/common/.
+Read CLAUDE.md and all files in src/init_job/ and src/common/.
 
-Create unit tests in tests/unit/ for process_webhook:
+Create unit tests in tests/unit/ for init_job:
 
 - test_validate.py: test valid orders pass, missing cmds fails, missing timeout fails, missing code source fails, fail-fast behavior
 - test_repackage.py: mock git clone, S3 download, SSM/secrets fetch, SOPS encrypt. Test repackage produces correct file structure.
@@ -213,7 +213,7 @@ Add a new job that depends on phase1-common:
         run: |
           pip install pytest moto boto3 requests responses
           pip install -e . || pip install -r requirements.txt
-      - name: Run process_webhook tests
+      - name: Run init_job tests
         run: |
           python -m pytest tests/unit/test_validate.py -v
           python -m pytest tests/unit/test_repackage.py -v

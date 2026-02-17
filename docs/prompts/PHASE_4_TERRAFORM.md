@@ -75,17 +75,17 @@ main.tf:
 
 api_gateway.tf:
 - HTTP API (aws_apigatewayv2_api)
-- POST /webhook route → process_webhook Lambda integration
+- POST /webhook route → init_job Lambda integration
 - Stage: $default with auto_deploy
 
 lambdas.tf:
 - 4 Lambda functions, all package_type = "Image", same image_uri = "${var.ecr_repo}:${var.image_tag}", different image_config.command:
-  - process_webhook: cmd = ["src.process_webhook.handler.handler"], timeout = 300, memory = 512
+  - init_job: cmd = ["src.init_job.handler.handler"], timeout = 300, memory = 512
   - orchestrator: cmd = ["src.orchestrator.handler.handler"], timeout = 600, memory = 512
   - watchdog_check: cmd = ["src.watchdog_check.handler.handler"], timeout = 60, memory = 256
   - worker: cmd = ["src.worker.handler.handler"], timeout = 600, memory = 1024
 - Environment variables on each Lambda for table names (IAC_CI_ORDERS_TABLE, IAC_CI_ORDER_EVENTS_TABLE, IAC_CI_LOCKS_TABLE) and bucket names (IAC_CI_INTERNAL_BUCKET, IAC_CI_DONE_BUCKET)
-- Lambda function URL on process_webhook for direct URL invocation
+- Lambda function URL on init_job for direct URL invocation
 
 step_functions.tf:
 - Watchdog state machine (aws_sfn_state_machine)
@@ -133,7 +133,7 @@ codebuild.tf:
   - Environment variables for table names and bucket names
 
 iam.tf:
-- process_webhook role + policy:
+- init_job role + policy:
   - DynamoDB: PutItem, GetItem, Query on orders + order_events tables
   - S3: PutObject, GetObject on internal bucket
   - SSM: GetParameter

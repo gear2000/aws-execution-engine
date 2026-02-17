@@ -10,7 +10,7 @@ The system processes jobs containing multiple orders, queues them in DynamoDB, a
 
 Two main flows:
 
-- **Part 1 (init_job):** `process_webhook` Lambda receives job parameters, validates orders, repackages with SOPS-encrypted credentials, uploads to S3, inserts into DynamoDB, posts initial PR comment, and triggers the orchestrator via S3 event.
+- **Part 1 (init_job):** `init_job` Lambda receives job parameters, validates orders, repackages with SOPS-encrypted credentials, uploads to S3, inserts into DynamoDB, posts initial PR comment, and triggers the orchestrator via S3 event.
 - **Part 2 (execute_orders):** `orchestrator` Lambda is triggered by S3 events (callbacks), acquires a per-run_id lock, evaluates dependency graphs, dispatches ready orders in parallel to Lambda or CodeBuild, and finalizes when all orders complete. Workers callback via presigned S3 PUT URLs. A Step Function watchdog per order handles timeout safety.
 
 ## Repo Structure
@@ -19,7 +19,7 @@ Two main flows:
 iac-ci/
 ├── src/
 │   ├── common/          # shared libraries (dynamodb, s3, sops, vcs, trace, flow, models)
-│   ├── process_webhook/ # Part 1: init_job Lambda
+│   ├── init_job/        # Part 1: init_job Lambda
 │   ├── orchestrator/    # Part 2: execute_orders Lambda
 │   ├── watchdog_check/  # Step Function timeout watchdog Lambda
 │   └── worker/          # dual-purpose: Lambda handler + CodeBuild entrypoint
