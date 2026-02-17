@@ -63,7 +63,6 @@ class TestRepackageOrder:
     @patch("src.common.sops.encrypt_env")
     def test_repackage_creates_files(self, mock_encrypt):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a mock encrypted file
             enc_file = os.path.join(tmpdir, "mock_enc.json")
             with open(enc_file, "w") as f:
                 f.write("{}")
@@ -71,10 +70,7 @@ class TestRepackageOrder:
 
             result_dir = sops.repackage_order(
                 code_dir=tmpdir,
-                env_vars={"APP_ENV": "staging"},
-                ssm_values={"DB_PASS": "secret123"},
-                secret_values={"API_KEY": "key456"},
-                callback_url="https://callback.example.com",
+                env_vars={"APP_ENV": "staging", "DB_PASS": "secret123"},
             )
 
             assert result_dir == tmpdir
@@ -89,19 +85,9 @@ class TestRepackageOrder:
                 lines = f.read().strip().split("\n")
             assert "APP_ENV" in lines
             assert "DB_PASS" in lines
-            assert "API_KEY" in lines
-            assert "CALLBACK_URL" in lines
-
-            # Check secrets.src has paths
-            secrets_file = os.path.join(tmpdir, "secrets.src")
-            assert os.path.exists(secrets_file)
-            with open(secrets_file) as f:
-                lines = f.read().strip().split("\n")
-            assert "DB_PASS" in lines
-            assert "API_KEY" in lines
 
     @patch("src.common.sops.encrypt_env")
-    def test_repackage_merges_callback_url(self, mock_encrypt):
+    def test_repackage_passes_all_env_vars_to_encrypt(self, mock_encrypt):
         with tempfile.TemporaryDirectory() as tmpdir:
             enc_file = os.path.join(tmpdir, "mock_enc.json")
             with open(enc_file, "w") as f:
@@ -110,15 +96,12 @@ class TestRepackageOrder:
 
             sops.repackage_order(
                 code_dir=tmpdir,
-                env_vars={},
-                ssm_values={},
-                secret_values={},
-                callback_url="https://callback.url",
+                env_vars={"KEY1": "val1", "KEY2": "val2"},
             )
 
-            # Verify encrypt_env was called with CALLBACK_URL
+            # Verify encrypt_env received the exact dict
             call_args = mock_encrypt.call_args[0][0]
-            assert call_args["CALLBACK_URL"] == "https://callback.url"
+            assert call_args == {"KEY1": "val1", "KEY2": "val2"}
 
 
 class TestRunCmd:

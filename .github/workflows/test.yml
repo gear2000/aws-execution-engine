@@ -2,26 +2,57 @@ name: Tests
 on: [push, pull_request]
 
 jobs:
-  phase1-common:
+  unit-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-          allow-prereleases: true
-      - name: Install dependencies
-        run: |
-          pip install pytest moto boto3 requests responses
+
+      - name: Build test image
+        run: docker build -f docker/Dockerfile.test -t iac-ci-tests .
+
       - name: Run common library tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -m pytest tests/unit/test_models.py -v
-          python -m pytest tests/unit/test_trace.py -v
-          python -m pytest tests/unit/test_flow.py -v
-          python -m pytest tests/unit/test_dynamodb.py -v
-          python -m pytest tests/unit/test_s3.py -v
-          python -m pytest tests/unit/test_sops.py -v
-          python -m pytest tests/unit/test_vcs_github.py -v
-          python -m pytest tests/unit/test_vcs_helper.py -v
+          docker run --rm iac-ci-tests \
+            tests/unit/test_models.py \
+            tests/unit/test_trace.py \
+            tests/unit/test_flow.py \
+            tests/unit/test_dynamodb.py \
+            tests/unit/test_s3.py \
+            tests/unit/test_sops.py \
+            tests/unit/test_vcs_github.py \
+            tests/unit/test_vcs_helper.py \
+            -v
+
+      - name: Run init_job tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/unit/test_validate.py \
+            tests/unit/test_repackage.py \
+            tests/unit/test_upload.py \
+            tests/unit/test_insert.py \
+            tests/unit/test_pr_comment.py \
+            tests/unit/test_handler.py \
+            -v
+
+      - name: Run orchestrator tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/unit/test_orchestrator_lock.py \
+            tests/unit/test_read_state.py \
+            tests/unit/test_evaluate.py \
+            tests/unit/test_dispatch.py \
+            tests/unit/test_finalize.py \
+            -v
+
+      - name: Run watchdog tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/unit/test_watchdog.py \
+            -v
+
+      - name: Run worker tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/unit/test_worker_run.py \
+            tests/unit/test_worker_callback.py \
+            -v

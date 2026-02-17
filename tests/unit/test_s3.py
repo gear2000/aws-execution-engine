@@ -91,21 +91,18 @@ class TestReadResult:
 
 
 class TestWriteResult:
-    def test_write_result(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        with patch("src.common.s3.requests.put", return_value=mock_response) as mock_put:
-            status_code = s3.write_result(
-                "https://presigned.example.com/result.json",
-                "succeeded",
-                "all good",
-            )
-            assert status_code == 200
-            mock_put.assert_called_once()
-            call_kwargs = mock_put.call_args
-            body = json.loads(call_kwargs[1]["data"])
-            assert body["status"] == "succeeded"
-            assert body["log"] == "all good"
+    def test_write_result(self, s3_client):
+        key = s3.write_result(
+            "test-internal", "run-1", "001",
+            "succeeded", "all good",
+            s3_client=s3_client,
+        )
+        assert key == "tmp/callbacks/runs/run-1/001/result.json"
+
+        obj = s3_client.get_object(Bucket="test-internal", Key=key)
+        body = json.loads(obj["Body"].read().decode())
+        assert body["status"] == "succeeded"
+        assert body["log"] == "all good"
 
 
 class TestWriteInitTrigger:
@@ -123,9 +120,9 @@ class TestWriteInitTrigger:
 
 class TestWriteDoneEndpoint:
     def test_write_done(self, s3_client):
-        summary = {"status": "succeeded", "summary": {"succeeded": 3, "failed": 0}}
+        summary = {"succeeded": 3, "failed": 0}
         key = s3.write_done_endpoint(
-            "test-done", "run-1", summary,
+            "test-done", "run-1", "succeeded", summary,
             s3_client=s3_client,
         )
         assert key == "run-1/done"
@@ -133,6 +130,7 @@ class TestWriteDoneEndpoint:
         obj = s3_client.get_object(Bucket="test-done", Key=key)
         body = json.loads(obj["Body"].read().decode())
         assert body["status"] == "succeeded"
+        assert body["summary"]["succeeded"] == 3
 
 
 class TestCheckResultExists:
