@@ -115,11 +115,17 @@ def repackage_order(
     ssm_values: Dict[str, str],
     secret_values: Dict[str, str],
     callback_url: str,
+    run_id: str = "",
+    order_id: str = "",
+    order_num: str = "",
+    trace_id: str = "",
+    flow_id: str = "",
     sops_key: Optional[str] = None,
 ) -> str:
     """Repackage an order directory with encrypted credentials.
 
-    Merges env_vars + ssm_values + secret_values + CALLBACK_URL,
+    Merges env_vars + ssm_values + secret_values + callback URL +
+    introspection fields (TRACE_ID, RUN_ID, ORDER_ID, ORDER_NUM, FLOW_ID),
     encrypts with SOPS, and writes metadata files.
 
     Returns path to the repackaged directory.
@@ -130,6 +136,13 @@ def repackage_order(
     merged.update(ssm_values)
     merged.update(secret_values)
     merged["CALLBACK_URL"] = callback_url
+
+    # Introspection fields — available to worker for logging/tracing
+    merged["TRACE_ID"] = trace_id
+    merged["RUN_ID"] = run_id
+    merged["ORDER_ID"] = order_id
+    merged["ORDER_NUM"] = order_num
+    merged["FLOW_ID"] = flow_id
 
     # Encrypt with SOPS
     encrypted_file, key_used = encrypt_env(merged, sops_key)

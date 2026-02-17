@@ -75,6 +75,11 @@ class TestRepackageOrder:
                 ssm_values={"DB_PASS": "secret123"},
                 secret_values={"API_KEY": "key456"},
                 callback_url="https://callback.example.com",
+                run_id="run-1",
+                order_id="deploy-vpc",
+                order_num="001",
+                trace_id="abc123",
+                flow_id="user:abc123-exec",
             )
 
             assert result_dir == tmpdir
@@ -91,6 +96,12 @@ class TestRepackageOrder:
             assert "DB_PASS" in lines
             assert "API_KEY" in lines
             assert "CALLBACK_URL" in lines
+            # Introspection fields
+            assert "TRACE_ID" in lines
+            assert "RUN_ID" in lines
+            assert "ORDER_ID" in lines
+            assert "ORDER_NUM" in lines
+            assert "FLOW_ID" in lines
 
             # Check secrets.src has paths
             secrets_file = os.path.join(tmpdir, "secrets.src")
@@ -119,6 +130,35 @@ class TestRepackageOrder:
             # Verify encrypt_env was called with CALLBACK_URL
             call_args = mock_encrypt.call_args[0][0]
             assert call_args["CALLBACK_URL"] == "https://callback.url"
+
+    @patch("src.common.sops.encrypt_env")
+    def test_repackage_includes_introspection_fields(self, mock_encrypt):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            enc_file = os.path.join(tmpdir, "mock_enc.json")
+            with open(enc_file, "w") as f:
+                f.write("{}")
+            mock_encrypt.return_value = (enc_file, "age1key")
+
+            sops.repackage_order(
+                code_dir=tmpdir,
+                env_vars={},
+                ssm_values={},
+                secret_values={},
+                callback_url="https://callback.url",
+                run_id="run-42",
+                order_id="deploy-rds",
+                order_num="003",
+                trace_id="deadbeef",
+                flow_id="admin:deadbeef-exec",
+            )
+
+            # Verify encrypt_env was called with introspection fields
+            call_args = mock_encrypt.call_args[0][0]
+            assert call_args["TRACE_ID"] == "deadbeef"
+            assert call_args["RUN_ID"] == "run-42"
+            assert call_args["ORDER_ID"] == "deploy-rds"
+            assert call_args["ORDER_NUM"] == "003"
+            assert call_args["FLOW_ID"] == "admin:deadbeef-exec"
 
 
 class TestRunCmd:
