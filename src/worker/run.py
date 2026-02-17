@@ -1,5 +1,6 @@
 """Worker execution logic — download, decrypt, run commands, callback."""
 
+import glob
 import json
 import logging
 import os
@@ -11,7 +12,7 @@ from typing import Optional
 
 import boto3
 
-from src.common import sops
+from src.common import dynamodb, sops
 from src.worker.callback import send_callback
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,78 @@ def _decrypt_and_load_env(work_dir: str) -> dict:
         os.environ[k] = str(v)
 
     return env_vars
+
+
+def _setup_events_dir(trace_id: str) -> str:
+    """Create the shared events directory and expose it via env var.
+
+    Subprocesses write JSON event files here. After command execution,
+    the main process reads them and transfers to DynamoDB.
+    """
+    events_dir = f"/var/tmp/share/{trace_id}/events"
+    os.makedirs(events_dir, exist_ok=True)
+    os.environ["IAC_CI_EVENTS_DIR"] = events_dir
+    return events_dir
+
+
+def _collect_and_write_events(
+    events_dir: str,
+    trace_id: str,
+    order_name: str,
+    flow_id: str = "",
+    run_id: str = "",
+) -> int:
+    """Read JSON event files from shared dir and write to DynamoDB order_events.
+
+    Returns the number of events successfully written.
+    """
+    if not os.path.isdir(events_dir):
+        return 0
+
+    json_files = sorted(glob.glob(os.path.join(events_dir, "*.json")))
+    if not json_files:
+        return 0
+
+    count = 0
+    for filepath in json_files:
+        filename = os.path.basename(filepath)
+        stem = os.path.splitext(filename)[0]
+
+        try:
+            with open(filepath) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Skipping malformed event file %s: %s", filename, e)
+            continue
+
+        if not isinstance(data, dict):
+            logger.warning("Skipping event file %s: not a JSON object", filename)
+            continue
+
+        event_type = data.pop("event_type", stem)
+        status = data.pop("status", "info")
+
+        extra_fields = {}
+        if flow_id:
+            extra_fields["flow_id"] = flow_id
+        if run_id:
+            extra_fields["run_id"] = run_id
+        extra_fields.update(data)
+
+        try:
+            dynamodb.put_event(
+                trace_id=trace_id,
+                order_name=order_name,
+                event_type=event_type,
+                status=status,
+                extra_fields=extra_fields if extra_fields else None,
+            )
+            count += 1
+        except Exception as e:
+            logger.warning("Failed to write event %s to DynamoDB: %s", filename, e)
+
+    logger.info("Collected %d event(s) from %s", count, events_dir)
+    return count
 
 
 def _execute_commands(cmds: list, work_dir: str, timeout: int = 0) -> tuple:
@@ -128,7 +201,16 @@ def run(s3_location: str, internal_bucket: str = "") -> str:
     # 2. Decrypt and load env vars
     env_vars = _decrypt_and_load_env(work_dir)
 
-    # 3. Read commands from order config (if present) or env
+    # 3. Set up shared events directory for subprocess event reporting
+    trace_id = env_vars.get("TRACE_ID", "")
+    order_name = env_vars.get("ORDER_ID", "")
+    flow_id = env_vars.get("FLOW_ID", "")
+    run_id = env_vars.get("RUN_ID", "")
+    events_dir = ""
+    if trace_id:
+        events_dir = _setup_events_dir(trace_id)
+
+    # 4. Read commands from order config (if present) or env
     cmds_str = env_vars.get("CMDS", "")
     if cmds_str:
         try:
@@ -151,11 +233,15 @@ def run(s3_location: str, internal_bucket: str = "") -> str:
             send_callback(callback_url, "failed", "No commands found")
         return "failed"
 
-    # 4. Execute
+    # 5. Execute
     timeout = int(env_vars.get("TIMEOUT", os.environ.get("TIMEOUT", "0")))
     status, log_output = _execute_commands(cmds, work_dir, timeout=timeout)
 
-    # 5. Callback
+    # 6. Collect subprocess events and write to DynamoDB
+    if events_dir and trace_id and order_name:
+        _collect_and_write_events(events_dir, trace_id, order_name, flow_id, run_id)
+
+    # 7. Callback
     callback_url = env_vars.get("CALLBACK_URL", "")
     if callback_url:
         send_callback(callback_url, status, log_output)

@@ -195,6 +195,11 @@ resource "aws_iam_role_policy" "worker" {
         Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.internal.arn}/tmp/exec/*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem"]
+        Resource = aws_dynamodb_table.order_events.arn
+      },
     ]
   })
 }
@@ -247,6 +252,11 @@ resource "aws_iam_role_policy" "codebuild" {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.internal.arn}/tmp/exec/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem"]
+        Resource = aws_dynamodb_table.order_events.arn
       },
       {
         Effect = "Allow"
