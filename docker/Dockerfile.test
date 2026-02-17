@@ -1,16 +1,12 @@
-FROM python:3.11-slim
-
-WORKDIR /app
+FROM public.ecr.aws/lambda/python:3.14
 
 # Install dependencies
 COPY requirements.txt requirements-test.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-test.txt
+RUN python3 -m pip install -r requirements.txt -r requirements-test.txt --target ${LAMBDA_TASK_ROOT}
 
 # Copy source and tests
-COPY src/ src/
-COPY tests/ tests/
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+COPY tests/ ${LAMBDA_TASK_ROOT}/tests/
 
-ENV PYTHONPATH=/app
-
-ENTRYPOINT ["python", "-m", "pytest"]
+ENTRYPOINT ["python3", "-m", "pytest"]
 CMD ["tests/unit/", "-v"]
