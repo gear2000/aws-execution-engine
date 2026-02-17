@@ -56,3 +56,33 @@ jobs:
             tests/unit/test_worker_run.py \
             tests/unit/test_worker_callback.py \
             -v
+
+  terraform-validate:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5'
+
+      - name: Validate 00-bootstrap
+        run: |
+          cd infra/00-bootstrap
+          terraform init
+          terraform validate
+          terraform fmt -check
+
+      - name: Validate 01-ecr
+        run: |
+          cd infra/01-ecr
+          terraform init
+          terraform validate
+          terraform fmt -check
+
+      - name: Validate 02-deploy
+        run: |
+          cd infra/02-deploy
+          terraform init -backend=false
+          terraform validate
+          terraform fmt -check
