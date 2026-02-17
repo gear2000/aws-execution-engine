@@ -1,4 +1,4 @@
-"""Unit tests for src/process_webhook/handler.py."""
+"""Unit tests for src/init_job/handler.py."""
 
 import base64
 import json
@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.common.models import Job, Order
-from src.process_webhook.handler import handler, _normalize_event, process_job_and_insert_orders
+from src.init_job.handler import handler, process_job_and_insert_orders
 
 
 def _make_job_b64(**kwargs):
@@ -21,50 +21,15 @@ def _make_job_b64(**kwargs):
     return base64.b64encode(json.dumps(defaults).encode()).decode()
 
 
-class TestNormalizeEvent:
-    def test_api_gateway_event(self):
-        event = {
-            "body": json.dumps({"job_parameters_b64": "abc123"}),
-        }
-        result = _normalize_event(event)
-        assert result["job_parameters_b64"] == "abc123"
-
-    def test_api_gateway_base64_encoded(self):
-        payload = json.dumps({"job_parameters_b64": "abc123"})
-        event = {
-            "body": base64.b64encode(payload.encode()).decode(),
-            "isBase64Encoded": True,
-        }
-        result = _normalize_event(event)
-        assert result["job_parameters_b64"] == "abc123"
-
-    def test_sns_event(self):
-        event = {
-            "Records": [{
-                "Sns": {
-                    "Message": json.dumps({"job_parameters_b64": "fromSNS"}),
-                },
-            }],
-        }
-        result = _normalize_event(event)
-        assert result["job_parameters_b64"] == "fromSNS"
-
-    def test_direct_invoke(self):
-        event = {"job_parameters_b64": "direct"}
-        result = _normalize_event(event)
-        assert result["job_parameters_b64"] == "direct"
-
-
 class TestHandler:
-    def test_missing_job_parameters_returns_400(self):
-        event = {"body": json.dumps({})}
+    def test_missing_job_parameters_returns_error(self):
+        event = {}
         resp = handler(event)
-        assert resp["statusCode"] == 400
-        body = json.loads(resp["body"])
-        assert "Missing" in body["error"]
+        assert resp["status"] == "error"
+        assert "Missing" in resp["error"]
 
-    @patch("src.process_webhook.handler.process_job_and_insert_orders")
-    def test_valid_request_returns_200(self, mock_process):
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_valid_request_returns_ok(self, mock_process):
         mock_process.return_value = {
             "status": "ok",
             "run_id": "run-1",
@@ -75,16 +40,13 @@ class TestHandler:
             "init_pr_comment": None,
         }
 
-        event = {
-            "body": json.dumps({"job_parameters_b64": _make_job_b64()}),
-        }
+        event = {"job_parameters_b64": _make_job_b64()}
         resp = handler(event)
-        assert resp["statusCode"] == 200
-        body = json.loads(resp["body"])
-        assert body["run_id"] == "run-1"
+        assert resp["status"] == "ok"
+        assert resp["run_id"] == "run-1"
 
-    @patch("src.process_webhook.handler.process_job_and_insert_orders")
-    def test_validation_error_returns_400(self, mock_process):
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_validation_error_returns_error(self, mock_process):
         mock_process.return_value = {
             "status": "error",
             "errors": ["order[0]: cmds is empty"],
@@ -92,30 +54,27 @@ class TestHandler:
             "trace_id": "abc",
         }
 
-        event = {
-            "body": json.dumps({"job_parameters_b64": _make_job_b64()}),
-        }
+        event = {"job_parameters_b64": _make_job_b64()}
         resp = handler(event)
-        assert resp["statusCode"] == 400
+        assert resp["status"] == "error"
 
-    @patch("src.process_webhook.handler.process_job_and_insert_orders")
-    def test_exception_returns_500(self, mock_process):
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_exception_returns_error(self, mock_process):
         mock_process.side_effect = RuntimeError("boom")
 
-        event = {
-            "body": json.dumps({"job_parameters_b64": _make_job_b64()}),
-        }
+        event = {"job_parameters_b64": _make_job_b64()}
         resp = handler(event)
-        assert resp["statusCode"] == 500
+        assert resp["status"] == "error"
+        assert "boom" in resp["error"]
 
 
 class TestProcessJobAndInsertOrders:
-    @patch("src.process_webhook.handler.s3_ops.write_init_trigger")
-    @patch("src.process_webhook.handler.init_pr_comment")
-    @patch("src.process_webhook.handler.insert_orders")
-    @patch("src.process_webhook.handler.upload_orders")
-    @patch("src.process_webhook.handler.repackage_orders")
-    @patch("src.process_webhook.handler.validate_orders")
+    @patch("src.init_job.handler.s3_ops.write_init_trigger")
+    @patch("src.init_job.handler.init_pr_comment")
+    @patch("src.init_job.handler.insert_orders")
+    @patch("src.init_job.handler.upload_orders")
+    @patch("src.init_job.handler.repackage_orders")
+    @patch("src.init_job.handler.validate_orders")
     def test_full_flow(
         self, mock_validate, mock_repackage, mock_upload,
         mock_insert, mock_pr, mock_trigger, monkeypatch,

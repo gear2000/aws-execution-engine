@@ -1,11 +1,11 @@
-"""Unit tests for src/process_webhook/pr_comment.py."""
+"""Unit tests for src/init_job/pr_comment.py."""
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from src.common.models import Job, Order
-from src.process_webhook.pr_comment import init_pr_comment, _build_comment_body
+from src.init_job.pr_comment import init_pr_comment, _build_comment_body
 
 
 def _make_job(orders=None, **kwargs):
@@ -73,7 +73,7 @@ class TestBuildCommentBody:
 
 
 class TestInitPrComment:
-    @patch("src.process_webhook.pr_comment.VcsHelper")
+    @patch("src.init_job.pr_comment.VcsHelper")
     def test_posts_comment(self, MockVcsHelper):
         from src.common.vcs.helper import VcsHelper as RealVcsHelper
 

@@ -1,9 +1,9 @@
-"""Unit tests for src/process_webhook/validate.py."""
+"""Unit tests for src/init_job/validate.py."""
 
 import pytest
 
 from src.common.models import Job, Order
-from src.process_webhook.validate import validate_orders
+from src.init_job.validate import validate_orders
 
 
 def _make_job(orders=None, **kwargs):

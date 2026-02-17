@@ -1,4 +1,4 @@
-"""Unit tests for src/process_webhook/repackage.py."""
+"""Unit tests for src/init_job/repackage.py."""
 
 import os
 import tempfile
@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.common.models import Job, Order
-from src.process_webhook.repackage import (
+from src.init_job.repackage import (
     repackage_orders,
     _fetch_ssm_values,
     _fetch_secret_values,
@@ -51,11 +51,11 @@ class TestZipDirectory:
 
 
 class TestRepackageOrders:
-    @patch("src.process_webhook.repackage._fetch_code_git")
-    @patch("src.process_webhook.repackage._fetch_ssm_values")
-    @patch("src.process_webhook.repackage._fetch_secret_values")
-    @patch("src.process_webhook.repackage.s3_ops.generate_callback_presigned_url")
-    @patch("src.process_webhook.repackage.OrderBundler")
+    @patch("src.init_job.repackage._fetch_code_git")
+    @patch("src.init_job.repackage._fetch_ssm_values")
+    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
+    @patch("src.init_job.repackage.OrderBundler")
     def test_repackage_produces_correct_structure(
         self, MockBundler, mock_presign, mock_secrets,
         mock_ssm, mock_git,
@@ -100,11 +100,11 @@ class TestRepackageOrders:
             assert call_kwargs["trace_id"] == "abc123"
             assert call_kwargs["ssm_values"] == {"DB_PASS": "secret"}
 
-    @patch("src.process_webhook.repackage._fetch_code_s3")
-    @patch("src.process_webhook.repackage._fetch_ssm_values")
-    @patch("src.process_webhook.repackage._fetch_secret_values")
-    @patch("src.process_webhook.repackage.s3_ops.generate_callback_presigned_url")
-    @patch("src.process_webhook.repackage.OrderBundler")
+    @patch("src.init_job.repackage._fetch_code_s3")
+    @patch("src.init_job.repackage._fetch_ssm_values")
+    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
+    @patch("src.init_job.repackage.OrderBundler")
     def test_s3_code_source(
         self, MockBundler, mock_presign, mock_secrets,
         mock_ssm, mock_s3,
@@ -134,11 +134,11 @@ class TestRepackageOrders:
             assert len(results) == 1
             mock_s3.assert_called_once_with("s3://bucket/code.zip")
 
-    @patch("src.process_webhook.repackage._fetch_code_git")
-    @patch("src.process_webhook.repackage._fetch_ssm_values")
-    @patch("src.process_webhook.repackage._fetch_secret_values")
-    @patch("src.process_webhook.repackage.s3_ops.generate_callback_presigned_url")
-    @patch("src.process_webhook.repackage.OrderBundler")
+    @patch("src.init_job.repackage._fetch_code_git")
+    @patch("src.init_job.repackage._fetch_ssm_values")
+    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
+    @patch("src.init_job.repackage.OrderBundler")
     def test_multiple_orders(
         self, MockBundler, mock_presign, mock_secrets,
         mock_ssm, mock_git,

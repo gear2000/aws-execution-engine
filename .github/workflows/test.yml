@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pytest moto boto3 requests responses
-      - name: Run process_webhook tests
+      - name: Run init_job tests
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |

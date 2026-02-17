@@ -1,4 +1,4 @@
-"""Unit tests for src/process_webhook/insert.py."""
+"""Unit tests for src/init_job/insert.py."""
 
 import boto3
 import pytest
@@ -6,7 +6,7 @@ from moto import mock_aws
 
 from src.common.models import Job, Order, QUEUED, JOB_ORDER_NAME
 from src.common import dynamodb
-from src.process_webhook.insert import insert_orders
+from src.init_job.insert import insert_orders
 
 
 @pytest.fixture

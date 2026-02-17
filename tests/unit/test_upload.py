@@ -1,4 +1,4 @@
-"""Unit tests for src/process_webhook/upload.py."""
+"""Unit tests for src/init_job/upload.py."""
 
 import os
 import tempfile
@@ -7,7 +7,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.process_webhook.upload import upload_orders
+from src.init_job.upload import upload_orders
 
 
 @pytest.fixture
