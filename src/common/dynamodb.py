@@ -1,11 +1,54 @@
 """DynamoDB operations for orders, order_events, and orchestrator_locks tables."""
 
+import functools
+import logging
 import os
+import random
 import time
 from typing import Dict, List, Optional
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+
+# Retry configuration
+MAX_RETRIES = 4
+BASE_DELAY = 0.5  # seconds
+MAX_DELAY = 16.0  # seconds
+
+_THROTTLE_CODES = frozenset({
+    "ProvisionedThroughputExceededException",
+    "ThrottlingException",
+    "RequestLimitExceeded",
+})
+
+
+def retry_on_throttle(func):
+    """Retry DynamoDB operations on throttling with exponential backoff + jitter."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        last_exc = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except ClientError as exc:
+                error_code = exc.response["Error"]["Code"]
+                if error_code not in _THROTTLE_CODES:
+                    raise
+                last_exc = exc
+                if attempt < MAX_RETRIES:
+                    delay = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
+                    jitter = random.uniform(0, delay * 0.5)
+                    sleep_time = delay + jitter
+                    logger.warning(
+                        "DynamoDB throttled (%s), retry %d/%d in %.1fs",
+                        error_code, attempt + 1, MAX_RETRIES, sleep_time,
+                    )
+                    time.sleep(sleep_time)
+        raise last_exc
+    return wrapper
 
 
 def _get_table(table_env_var: str, dynamodb_resource=None):
@@ -19,6 +62,7 @@ def _get_table(table_env_var: str, dynamodb_resource=None):
 # --- Orders table operations ---
 
 
+@retry_on_throttle
 def put_order(
     run_id: str,
     order_num: str,
@@ -36,6 +80,7 @@ def put_order(
     table.put_item(Item=item)
 
 
+@retry_on_throttle
 def get_order(
     run_id: str,
     order_num: str,
@@ -47,6 +92,7 @@ def get_order(
     return response.get("Item")
 
 
+@retry_on_throttle
 def get_all_orders(
     run_id: str,
     dynamodb_resource=None,
@@ -59,6 +105,7 @@ def get_all_orders(
     return response.get("Items", [])
 
 
+@retry_on_throttle
 def update_order_status(
     run_id: str,
     order_num: str,
@@ -93,6 +140,7 @@ def update_order_status(
 # --- Order events table operations ---
 
 
+@retry_on_throttle
 def put_event(
     trace_id: str,
     order_name: str,
@@ -118,6 +166,7 @@ def put_event(
     table.put_item(Item=item)
 
 
+@retry_on_throttle
 def get_events(
     trace_id: str,
     order_name_prefix: Optional[str] = None,
@@ -137,6 +186,7 @@ def get_events(
     return response.get("Items", [])
 
 
+@retry_on_throttle
 def get_latest_event(
     trace_id: str,
     order_name: str,
@@ -157,6 +207,7 @@ def get_latest_event(
 # --- Orchestrator locks table operations ---
 
 
+@retry_on_throttle
 def acquire_lock(
     run_id: str,
     orchestrator_id: str,
@@ -191,6 +242,7 @@ def acquire_lock(
         return False
 
 
+@retry_on_throttle
 def release_lock(
     run_id: str,
     dynamodb_resource=None,
@@ -205,6 +257,7 @@ def release_lock(
     )
 
 
+@retry_on_throttle
 def get_lock(
     run_id: str,
     dynamodb_resource=None,

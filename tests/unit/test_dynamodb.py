@@ -2,9 +2,11 @@
 
 import os
 import time
+from unittest.mock import patch, MagicMock
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from src.common import dynamodb
@@ -254,3 +256,118 @@ class TestLocksTable:
     def test_get_lock_not_found(self, ddb_resource):
         lock = dynamodb.get_lock("nonexistent", dynamodb_resource=ddb_resource)
         assert lock is None
+
+
+def _throttle_error(code="ProvisionedThroughputExceededException"):
+    """Create a ClientError simulating DynamoDB throttling."""
+    return ClientError(
+        {"Error": {"Code": code, "Message": "Rate exceeded"}},
+        "PutItem",
+    )
+
+
+def _access_denied_error():
+    """Create a non-throttle ClientError."""
+    return ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "Forbidden"}},
+        "PutItem",
+    )
+
+
+class TestRetryOnThrottle:
+    @patch("src.common.dynamodb.time.sleep")
+    def test_retries_on_provisioned_throughput_exceeded(self, mock_sleep, ddb_resource):
+        """Throttling on first call, succeeds on retry."""
+        real_table = ddb_resource.Table("test-orders")
+        original_put = real_table.put_item
+        call_count = {"n": 0}
+
+        def flaky_put(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise _throttle_error()
+            return original_put(**kwargs)
+
+        mock_table = MagicMock(wraps=real_table)
+        mock_table.put_item = flaky_put
+
+        with patch("src.common.dynamodb._get_table", return_value=mock_table):
+            dynamodb.put_order(
+                "run-1", "001",
+                {"status": "queued", "order_name": "test"},
+                dynamodb_resource=ddb_resource,
+            )
+
+        assert call_count["n"] == 2
+        assert mock_sleep.call_count == 1
+
+    @patch("src.common.dynamodb.time.sleep")
+    def test_retries_on_throttling_exception(self, mock_sleep, ddb_resource):
+        """Also retries on ThrottlingException error code."""
+        real_table = ddb_resource.Table("test-orders")
+        original_get = real_table.get_item
+        call_count = {"n": 0}
+
+        def flaky_get(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] <= 2:
+                raise _throttle_error("ThrottlingException")
+            return original_get(**kwargs)
+
+        mock_table = MagicMock(wraps=real_table)
+        mock_table.get_item = flaky_get
+
+        with patch("src.common.dynamodb._get_table", return_value=mock_table):
+            result = dynamodb.get_order("run-1", "001", dynamodb_resource=ddb_resource)
+
+        assert call_count["n"] == 3
+        assert mock_sleep.call_count == 2
+        assert result is None  # item doesn't exist, but no error
+
+    @patch("src.common.dynamodb.time.sleep")
+    def test_raises_after_max_retries_exhausted(self, mock_sleep, ddb_resource):
+        """Gives up after MAX_RETRIES and re-raises the throttle error."""
+        mock_table = MagicMock()
+        mock_table.put_item.side_effect = _throttle_error()
+
+        with patch("src.common.dynamodb._get_table", return_value=mock_table):
+            with pytest.raises(ClientError) as exc_info:
+                dynamodb.put_order(
+                    "run-1", "001",
+                    {"status": "queued", "order_name": "test"},
+                    dynamodb_resource=ddb_resource,
+                )
+
+        assert exc_info.value.response["Error"]["Code"] == "ProvisionedThroughputExceededException"
+        assert mock_sleep.call_count == dynamodb.MAX_RETRIES
+
+    @patch("src.common.dynamodb.time.sleep")
+    def test_does_not_retry_non_throttle_errors(self, mock_sleep, ddb_resource):
+        """Non-throttle ClientErrors are raised immediately without retry."""
+        mock_table = MagicMock()
+        mock_table.put_item.side_effect = _access_denied_error()
+
+        with patch("src.common.dynamodb._get_table", return_value=mock_table):
+            with pytest.raises(ClientError) as exc_info:
+                dynamodb.put_order(
+                    "run-1", "001",
+                    {"status": "queued", "order_name": "test"},
+                    dynamodb_resource=ddb_resource,
+                )
+
+        assert exc_info.value.response["Error"]["Code"] == "AccessDeniedException"
+        assert mock_sleep.call_count == 0  # no retries
+
+    def test_conditional_check_not_retried_on_acquire_lock(self, ddb_resource):
+        """ConditionalCheckFailedException on acquire_lock is not retried (expected behavior)."""
+        # First acquire succeeds
+        dynamodb.acquire_lock(
+            "run-1", "orch-1", 3600, "user:abc-exec", "abc",
+            dynamodb_resource=ddb_resource,
+        )
+        # Second acquire fails with ConditionalCheckFailed (not a throttle)
+        result = dynamodb.acquire_lock(
+            "run-1", "orch-2", 3600, "user:abc-exec", "abc",
+            dynamodb_resource=ddb_resource,
+        )
+        assert result is False
