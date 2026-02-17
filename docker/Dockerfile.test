@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-test.txt
+
+# Copy source and tests
+COPY src/ src/
+COPY tests/ tests/
+
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python", "-m", "pytest"]
+CMD ["tests/unit/", "-v"]
