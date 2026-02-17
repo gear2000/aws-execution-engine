@@ -1,0 +1,27 @@
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  phase1-common:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          allow-prereleases: true
+      - name: Install dependencies
+        run: |
+          pip install pytest moto boto3 requests responses
+      - name: Run common library tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/unit/test_models.py -v
+          python -m pytest tests/unit/test_trace.py -v
+          python -m pytest tests/unit/test_flow.py -v
+          python -m pytest tests/unit/test_dynamodb.py -v
+          python -m pytest tests/unit/test_s3.py -v
+          python -m pytest tests/unit/test_sops.py -v
+          python -m pytest tests/unit/test_vcs_github.py -v
+          python -m pytest tests/unit/test_vcs_helper.py -v
