@@ -86,3 +86,45 @@ jobs:
           terraform init -backend=false
           terraform validate
           terraform fmt -check
+
+  script-tests:
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test generate_backend.sh
+        run: |
+          bash scripts/generate_backend.sh test-bucket ecr us-east-1
+          cat backend.tf
+          grep -q 'bucket = "test-bucket"' backend.tf
+          grep -q 'key    = "ecr/terraform.tfstate"' backend.tf
+          rm backend.tf
+
+      - name: Test generate_tfvars.sh
+        run: |
+          bash scripts/generate_tfvars.sh 123456.dkr.ecr.us-east-1.amazonaws.com/iac-ci abc123 us-east-1
+          cat terraform.tfvars
+          grep -q 'image_tag' terraform.tfvars
+          grep -q 'ecr_repo' terraform.tfvars
+          rm terraform.tfvars
+
+      - name: Test generate_bucket_name.sh
+        run: |
+          BUCKET=$(bash scripts/generate_bucket_name.sh)
+          echo "Generated: $BUCKET"
+          [[ "$BUCKET" == iac-ci-state-* ]]
+
+      - name: Test generate_bucket_name.sh with env override
+        run: |
+          IAC_CI_STATE_BUCKET=my-custom-bucket BUCKET=$(bash scripts/generate_bucket_name.sh)
+          [ "$BUCKET" = "my-custom-bucket" ]
+
+      - name: Validate deploy workflow syntax
+        run: |
+          pip install pyyaml
+          python -c "import yaml; yaml.safe_load(open('.github/workflows/deploy.yml'))"
+
+      - name: Validate test workflow syntax
+        run: |
+          python -c "import yaml; yaml.safe_load(open('.github/workflows/test.yml'))"
