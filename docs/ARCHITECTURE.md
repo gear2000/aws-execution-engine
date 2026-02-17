@@ -68,7 +68,9 @@ For each order:
   - get target account temp credentials
   - generate presigned S3 PUT URL for callback
   - merge all with env_vars
-  - encrypt everything with SOPS (auto-gen key if none provided)
+  - encrypt everything with SOPS (auto-gen age key if none provided)
+  - store SOPS private key in SSM Parameter Store as SecureString
+    path: /iac-ci/sops-keys/<run_id>/<order_num>
   - write env_vars.env
   - write secrets.src
   - re-zip tarball
@@ -238,18 +240,20 @@ Same code runs in Lambda and CodeBuild Docker container.
 
 ```
 1. Fetch exec.zip from S3
-2. Unpack SOPS → env vars:
+2. Fetch SOPS private key from SSM Parameter Store
+   path: /iac-ci/sops-keys/<run_id>/<order_num>
+3. Decrypt SOPS → env vars:
    - AWS creds (target account)
    - custom env vars
    - CALLBACK_URL (presigned S3 PUT)
-3. Run cmds (os.system / subprocess.Popen, no buffering)
-4. Capture exit code + stdout/stderr
-5. PUT to CALLBACK_URL:
+4. Run cmds (os.system / subprocess.Popen, no buffering)
+5. Capture exit code + stdout/stderr
+6. PUT to CALLBACK_URL:
    {"status": "succeeded/failed/timed_out", "log": "<stdout+stderr>"}
-6. S3 event fires → orchestrator re-triggered
+7. S3 event fires → orchestrator re-triggered
 ```
 
-No IAM role switching. Worker only operates with target account credentials from SOPS. Callback uses presigned URL (no AWS permissions needed).
+No IAM role switching. Worker only operates with target account credentials from SOPS. Worker needs ssm:GetParameter on /iac-ci/sops-keys/* to fetch the decryption key. Callback uses presigned URL (no additional AWS permissions needed).
 
 ---
 
@@ -283,10 +287,13 @@ Timeout distributed to three places: SOPS env var (worker self-enforces), Dynamo
 Repackage step (init_job):
   SSM/Secrets Manager → target account temp creds
   + env_vars + presigned callback URL
-  → all encrypted via SOPS → packed into exec.zip
+  → all encrypted via SOPS (age key) → packed into exec.zip
+  SOPS private key → SSM Parameter Store (SecureString)
+    /iac-ci/sops-keys/<run_id>/<order_num>
 
 Worker:
-  Unpack SOPS → env vars include:
+  Fetch SOPS private key from SSM Parameter Store
+  Decrypt SOPS → env vars include:
     AWS_ACCESS_KEY_ID     (target account)
     AWS_SECRET_ACCESS_KEY (target account)
     AWS_SESSION_TOKEN     (target account)
@@ -420,6 +427,7 @@ Done S3 bucket:        1 day lifecycle rule
 Orders table:          1 day DynamoDB TTL
 Orchestrator locks:    TTL = max_timeout of run
 Order events table:    90 day DynamoDB TTL (+ GSI for analytics)
+SOPS keys (SSM):       deleted on job finalization by orchestrator
 ```
 
 Nothing runs 24/7. No manual cleanup required.

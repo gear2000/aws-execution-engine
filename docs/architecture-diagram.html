@@ -656,6 +656,7 @@
               Validates orders &amp; dependencies<br>
               Fetches code (S3/Git), secrets (SSM/SecretsManager)<br>
               Encrypts creds with SOPS into exec.zip<br>
+              Stores SOPS key in SSM as SecureString<br>
               Generates presigned callback URLs<br>
               Posts initial PR comment<br>
               <span style="color: var(--accent-orange);">300s timeout &middot; 512MB</span>
@@ -770,7 +771,8 @@
             <div class="component-name">worker (Lambda)</div>
             <div class="component-detail">
               Short-lived orders<br>
-              Unpacks SOPS &rarr; env vars<br>
+              Fetches SOPS key from SSM<br>
+              Decrypts SOPS &rarr; env vars<br>
               Runs commands, captures output<br>
               PUTs result.json via presigned URL<br>
               <span style="color: var(--accent-orange);">600s timeout &middot; 1024MB</span>
@@ -783,6 +785,7 @@
               iac-ci-worker<br>
               Long-running orders<br>
               Same image, /entrypoint.sh CMD<br>
+              Fetches SOPS key from SSM<br>
               No timeout limit (vs Lambda 15min)<br>
               PUTs result.json via presigned URL
             </div>
@@ -845,7 +848,7 @@
         <div class="step-line"><div class="step-dot"></div><div class="step-connector"></div></div>
         <div class="step-content">
           <div class="step-label">2 &rsaquo; Validate &amp; repackage orders</div>
-          <div class="step-desc">init_job validates all orders, fetches code (S3/Git), retrieves secrets from SSM/Secrets Manager, encrypts credentials with SOPS, generates presigned S3 PUT URLs for worker callbacks</div>
+          <div class="step-desc">init_job validates all orders, fetches code (S3/Git), retrieves secrets from SSM/Secrets Manager, encrypts credentials with SOPS (age key), stores SOPS private key in SSM Parameter Store as SecureString, generates presigned S3 PUT URLs for worker callbacks</div>
           <span class="step-tag tag-lambda">LAMBDA</span>
         </div>
       </div>
@@ -944,7 +947,7 @@
         <div class="step-line"><div class="step-dot"></div><div class="step-connector"></div></div>
         <div class="step-content">
           <div class="step-label">12 &rsaquo; Worker executes &amp; callbacks</div>
-          <div class="step-desc">Worker unpacks SOPS &rarr; env vars, runs commands, captures stdout/stderr, PUTs result.json (status + log) via presigned URL &mdash; no DynamoDB creds needed</div>
+          <div class="step-desc">Worker fetches SOPS private key from SSM Parameter Store, decrypts SOPS bundle &rarr; env vars, runs commands, captures stdout/stderr, PUTs result.json (status + log) via presigned URL &mdash; no DynamoDB creds needed</div>
           <span class="step-tag tag-s3">PRESIGNED PUT</span>
         </div>
       </div>
@@ -962,7 +965,7 @@
         <div class="step-line"><div class="step-dot"></div><div class="step-connector"></div></div>
         <div class="step-content">
           <div class="step-label">14 &rsaquo; Finalize</div>
-          <div class="step-desc">All orders done &rarr; write done marker to S3, update final PR comment with summary, release lock</div>
+          <div class="step-desc">All orders done &rarr; write done marker to S3, clean up SOPS key SSM parameters, update final PR comment with summary, release lock</div>
           <span class="step-tag tag-vcs">VCS + S3</span>
         </div>
       </div>
@@ -1043,7 +1046,7 @@
         </div>
         <div class="design-item">
           <div class="design-label">SOPS Encryption</div>
-          <div class="design-desc">Target account credentials are fetched from SSM/Secrets Manager during repackage, encrypted into the exec.zip, and unpacked as env vars at execution time. Never stored in DynamoDB.</div>
+          <div class="design-desc">Target account credentials are fetched from SSM/Secrets Manager during repackage, encrypted with SOPS (age key) into exec.zip. The SOPS private key is stored in SSM Parameter Store as SecureString at /iac-ci/sops-keys/&lt;run_id&gt;/&lt;order_num&gt;. Workers fetch the key from SSM to decrypt. Keys are cleaned up during finalization. Never stored in DynamoDB.</div>
         </div>
       </div>
     </div>

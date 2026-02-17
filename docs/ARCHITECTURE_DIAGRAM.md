@@ -36,6 +36,7 @@ sequenceDiagram
     participant VCS as VCS / Webhook
     participant APIGW as API Gateway
     participant IJ as init_job Lambda
+    participant SSM as SSM Parameter Store
     participant S3 as S3 (internal)
     participant DDB as DynamoDB
     participant PR as VCS PR
@@ -45,7 +46,9 @@ sequenceDiagram
 
     Note over IJ: Validate orders<br>(cmds, timeout, code source)
 
-    IJ->>IJ: Fetch code (S3/Git)<br>Fetch secrets (SSM/SecretsManager)<br>Encrypt with SOPS<br>Generate presigned callback URLs
+    IJ->>IJ: Fetch code (S3/Git)<br>Fetch secrets (SSM/SecretsManager)<br>Encrypt with SOPS (age key)<br>Generate presigned callback URLs
+
+    IJ->>SSM: Store SOPS private key<br>as SecureString<br>/iac-ci/sops-keys/<run_id>/<order_num>
 
     IJ->>S3: PUT exec.zip per order<br>tmp/exec/<run_id>/<order_num>/exec.zip
 
@@ -69,6 +72,7 @@ sequenceDiagram
     participant S3 as S3 (internal)
     participant Orch as orchestrator Lambda
     participant DDB as DynamoDB
+    participant SSM as SSM Parameter Store
     participant Worker as Worker (Lambda/CodeBuild)
     participant SFN as Watchdog (Step Function)
     participant PR as VCS PR
@@ -89,7 +93,8 @@ sequenceDiagram
         Orch->>DDB: Update status → running
     end
 
-    Worker->>Worker: Unpack SOPS → env vars<br>Run commands<br>Capture stdout/stderr
+    Worker->>SSM: Fetch SOPS private key<br>/iac-ci/sops-keys/<run_id>/<order_num>
+    Worker->>Worker: Decrypt SOPS → env vars<br>Run commands<br>Capture stdout/stderr
 
     Worker->>S3: PUT result.json via presigned URL<br>(status + log)
 
@@ -98,6 +103,7 @@ sequenceDiagram
     Note over Orch: Re-evaluate graph<br>Dispatch next wave
 
     Orch->>S3: Write done marker<br>(when all orders complete)
+    Orch->>SSM: Delete SOPS key parameters<br>(cleanup)
     Orch->>PR: Final PR comment with summary
     Orch->>DDB: Release lock
 ```
@@ -117,6 +123,7 @@ graph TB
         S3Int["S3 Internal<br><i>exec.zip + callbacks</i><br>1-day lifecycle"]
         S3Done["S3 Done<br><i>completion markers</i><br>1-day lifecycle"]
         S3State["S3 State<br><i>TF state</i><br>permanent"]
+        SSM["SSM Parameter Store<br><i>SOPS private keys</i><br>SecureString, cleanup on finalize"]
         Orders["DynamoDB orders<br><i>PK: run_id:order_num</i><br>TTL: 1 day"]
         Events["DynamoDB order_events<br><i>PK: trace_id, SK: order:epoch</i><br>TTL: 90 days"]
         Locks["DynamoDB locks<br><i>PK: lock:run_id</i><br>TTL: dynamic"]
@@ -141,13 +148,17 @@ graph TB
     APIGW --> InitJob
     InitJob --> S3Int
     InitJob --> Orders
+    InitJob -- "store SOPS key" --> SSM
     S3Int -- "S3 event" --> Orch
     Orch --> WorkerL
     Orch --> WorkerCB
     Orch --> Watchdog
     Watchdog --> WDCheck
+    WorkerL -- "fetch SOPS key" --> SSM
+    WorkerCB -- "fetch SOPS key" --> SSM
     WorkerL -- "presigned PUT" --> S3Int
     WorkerCB -- "presigned PUT" --> S3Int
+    Orch -- "cleanup keys" --> SSM
     Orch --> S3Done
 
     style APIGW fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
@@ -163,6 +174,7 @@ graph TB
     style Orders fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
     style Events fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
     style Locks fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style SSM fill:#3d2b00,stroke:#eab308,color:#e2e8f0
     style ECR fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
     style IAM fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
