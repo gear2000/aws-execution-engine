@@ -5,7 +5,6 @@ import os
 from typing import Optional
 
 import boto3
-import requests
 
 
 def _get_client(s3_client=None):
@@ -65,18 +64,19 @@ def read_result(
 
 
 def write_result(
-    callback_url: str,
+    bucket: str,
+    run_id: str,
+    order_num: str,
     status: str,
     log: str,
-) -> int:
-    """PUT result.json to a presigned URL. Returns HTTP status code."""
+    s3_client=None,
+) -> str:
+    """Write result.json directly to S3 (used by watchdog, not workers)."""
+    client = _get_client(s3_client)
+    key = f"tmp/callbacks/runs/{run_id}/{order_num}/result.json"
     payload = json.dumps({"status": status, "log": log})
-    response = requests.put(
-        callback_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    return response.status_code
+    client.put_object(Bucket=bucket, Key=key, Body=payload)
+    return key
 
 
 def write_init_trigger(
@@ -95,13 +95,14 @@ def write_init_trigger(
 def write_done_endpoint(
     bucket: str,
     run_id: str,
+    status: str,
     summary: dict,
     s3_client=None,
 ) -> str:
     """Write <run_id>/done to the done bucket."""
     client = _get_client(s3_client)
     key = f"{run_id}/done"
-    payload = json.dumps(summary)
+    payload = json.dumps({"status": status, "summary": summary})
     client.put_object(Bucket=bucket, Key=key, Body=payload)
     return key
 

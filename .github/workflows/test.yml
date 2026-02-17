@@ -25,3 +25,46 @@ jobs:
           python -m pytest tests/unit/test_sops.py -v
           python -m pytest tests/unit/test_vcs_github.py -v
           python -m pytest tests/unit/test_vcs_helper.py -v
+
+  phase2-lambdas:
+    needs: phase1-common
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          allow-prereleases: true
+      - name: Install dependencies
+        run: |
+          pip install pytest moto boto3 requests responses
+      - name: Run process_webhook tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/unit/test_validate.py -v
+          python -m pytest tests/unit/test_repackage.py -v
+          python -m pytest tests/unit/test_upload.py -v
+          python -m pytest tests/unit/test_insert.py -v
+          python -m pytest tests/unit/test_pr_comment.py -v
+          python -m pytest tests/unit/test_handler.py -v
+      - name: Run orchestrator tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/unit/test_orchestrator_lock.py -v
+          python -m pytest tests/unit/test_read_state.py -v
+          python -m pytest tests/unit/test_evaluate.py -v
+          python -m pytest tests/unit/test_dispatch.py -v
+          python -m pytest tests/unit/test_finalize.py -v
+      - name: Run watchdog tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/unit/test_watchdog.py -v
+      - name: Run worker tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/unit/test_worker_run.py -v
+          python -m pytest tests/unit/test_worker_callback.py -v
