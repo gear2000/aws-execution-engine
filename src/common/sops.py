@@ -112,37 +112,17 @@ def decrypt_env(
 def repackage_order(
     code_dir: str,
     env_vars: Dict[str, str],
-    ssm_values: Dict[str, str],
-    secret_values: Dict[str, str],
-    callback_url: str,
-    run_id: str = "",
-    order_id: str = "",
-    order_num: str = "",
-    trace_id: str = "",
-    flow_id: str = "",
     sops_key: Optional[str] = None,
 ) -> str:
-    """Repackage an order directory with encrypted credentials.
+    """Repackage an order directory with SOPS-encrypted env vars.
 
-    Merges env_vars + ssm_values + secret_values + callback URL +
-    introspection fields (TRACE_ID, RUN_ID, ORDER_ID, ORDER_NUM, FLOW_ID),
-    encrypts with SOPS, and writes metadata files.
+    Takes a flat dict of all env vars to encrypt (caller is responsible
+    for assembling credentials, callback URLs, introspection fields, etc.).
+    Encrypts with SOPS and writes metadata files.
 
     Returns path to the repackaged directory.
     """
-    # Merge all env vars
-    merged = {}
-    merged.update(env_vars)
-    merged.update(ssm_values)
-    merged.update(secret_values)
-    merged["CALLBACK_URL"] = callback_url
-
-    # Introspection fields — available to worker for logging/tracing
-    merged["TRACE_ID"] = trace_id
-    merged["RUN_ID"] = run_id
-    merged["ORDER_ID"] = order_id
-    merged["ORDER_NUM"] = order_num
-    merged["FLOW_ID"] = flow_id
+    merged = dict(env_vars)
 
     # Encrypt with SOPS
     encrypted_file, key_used = encrypt_env(merged, sops_key)
@@ -156,11 +136,5 @@ def repackage_order(
     with open(env_file, "w") as f:
         for key in sorted(merged.keys()):
             f.write(f"{key}\n")
-
-    # Write secrets.src — list of SSM/secrets manager paths fetched
-    secrets_src = os.path.join(code_dir, "secrets.src")
-    with open(secrets_src, "w") as f:
-        for path in sorted(list(ssm_values.keys()) + list(secret_values.keys())):
-            f.write(f"{path}\n")
 
     return code_dir
