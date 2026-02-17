@@ -1,4 +1,10 @@
-"""Lambda entrypoint for init_job — Part 1: receive job, repackage, and insert orders."""
+"""Lambda entrypoint for init_job — Part 1: receive job, repackage, and insert orders.
+
+Supports three invocation sources:
+  - Direct Lambda invoke: {"job_parameters_b64": "..."}
+  - SNS trigger: {"Records": [{"Sns": {"Message": "{...}"}}]}
+  - API Gateway: {"httpMethod": "POST", "body": "{...}"}
+"""
 
 import json
 import logging
@@ -18,6 +24,33 @@ from src.init_job.insert import insert_orders
 from src.init_job.pr_comment import init_pr_comment
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the job payload from any supported invocation source.
+
+    Returns a flat dict with at minimum 'job_parameters_b64'.
+    """
+    # SNS: unwrap first record's Message
+    if "Records" in event:
+        records = event["Records"]
+        if records and "Sns" in records[0]:
+            message = records[0]["Sns"].get("Message", "{}")
+            if isinstance(message, str):
+                return json.loads(message)
+            return message
+
+    # API Gateway: unwrap body (+ reject non-POST)
+    if "httpMethod" in event:
+        if event["httpMethod"] != "POST":
+            return {"_apigw_error": f"Method {event['httpMethod']} not allowed"}
+        body = event.get("body", "")
+        if isinstance(body, str):
+            return json.loads(body) if body else {}
+        return body if isinstance(body, dict) else {}
+
+    # Direct invoke: event is the payload
+    return event
 
 
 def process_job_and_insert_orders(
@@ -104,21 +137,45 @@ def process_job_and_insert_orders(
     }
 
 
+def _apigw_response(status_code: int, body: dict) -> dict:
+    """Wrap result in API Gateway proxy response format."""
+    return {
+        "statusCode": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body),
+    }
+
+
 def handler(event: Dict[str, Any], context: Any = None) -> dict:
-    """Lambda entrypoint. Expects direct invoke with job payload."""
+    """Lambda entrypoint. Supports direct invoke, SNS, and API Gateway."""
+    is_apigw = "httpMethod" in event
+
     try:
-        job_parameters_b64 = event.get("job_parameters_b64", "")
+        payload = _normalize_event(event)
+
+        # API Gateway method rejection
+        if "_apigw_error" in payload:
+            return _apigw_response(405, {"status": "error", "error": payload["_apigw_error"]})
+
+        job_parameters_b64 = payload.get("job_parameters_b64", "")
 
         if not job_parameters_b64:
-            return {"status": "error", "error": "Missing job_parameters_b64"}
+            result = {"status": "error", "error": "Missing job_parameters_b64"}
+            return _apigw_response(400, result) if is_apigw else result
 
-        return process_job_and_insert_orders(
+        result = process_job_and_insert_orders(
             job_parameters_b64=job_parameters_b64,
-            trace_id=event.get("trace_id", ""),
-            run_id=event.get("run_id", ""),
-            done_endpt=event.get("done_endpt", ""),
+            trace_id=payload.get("trace_id", ""),
+            run_id=payload.get("run_id", ""),
+            done_endpt=payload.get("done_endpt", ""),
         )
+
+        if is_apigw:
+            code = 200 if result.get("status") == "ok" else 400
+            return _apigw_response(code, result)
+        return result
 
     except Exception as e:
         logger.exception("init_job failed")
-        return {"status": "error", "error": str(e)}
+        result = {"status": "error", "error": str(e)}
+        return _apigw_response(500, result) if is_apigw else result

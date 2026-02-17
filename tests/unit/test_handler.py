@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.common.models import Job, Order
-from src.init_job.handler import handler, process_job_and_insert_orders
+from src.init_job.handler import handler, process_job_and_insert_orders, _normalize_event
 
 
 def _make_job_b64(**kwargs):
@@ -21,12 +21,51 @@ def _make_job_b64(**kwargs):
     return base64.b64encode(json.dumps(defaults).encode()).decode()
 
 
-class TestHandler:
+# ── _normalize_event ──────────────────────────────────────────────
+
+class TestNormalizeEvent:
+    def test_direct_invoke_passthrough(self):
+        event = {"job_parameters_b64": "abc", "trace_id": "t1"}
+        assert _normalize_event(event) == event
+
+    def test_sns_unwraps_message(self):
+        payload = {"job_parameters_b64": "abc"}
+        event = {"Records": [{"Sns": {"Message": json.dumps(payload)}}]}
+        assert _normalize_event(event) == payload
+
+    def test_sns_dict_message(self):
+        payload = {"job_parameters_b64": "abc"}
+        event = {"Records": [{"Sns": {"Message": payload}}]}
+        assert _normalize_event(event) == payload
+
+    def test_apigw_post_unwraps_body(self):
+        payload = {"job_parameters_b64": "abc"}
+        event = {"httpMethod": "POST", "body": json.dumps(payload)}
+        assert _normalize_event(event) == payload
+
+    def test_apigw_dict_body(self):
+        payload = {"job_parameters_b64": "abc"}
+        event = {"httpMethod": "POST", "body": payload}
+        assert _normalize_event(event) == payload
+
+    def test_apigw_get_rejected(self):
+        event = {"httpMethod": "GET", "body": "{}"}
+        result = _normalize_event(event)
+        assert "_apigw_error" in result
+
+    def test_apigw_empty_body(self):
+        event = {"httpMethod": "POST", "body": ""}
+        assert _normalize_event(event) == {}
+
+
+# ── handler (direct invoke) ──────────────────────────────────────
+
+class TestHandlerDirectInvoke:
     def test_missing_job_parameters_returns_error(self):
-        event = {}
-        resp = handler(event)
+        resp = handler({})
         assert resp["status"] == "error"
         assert "Missing" in resp["error"]
+        assert "statusCode" not in resp  # not wrapped
 
     @patch("src.init_job.handler.process_job_and_insert_orders")
     def test_valid_request_returns_ok(self, mock_process):
@@ -44,28 +83,77 @@ class TestHandler:
         resp = handler(event)
         assert resp["status"] == "ok"
         assert resp["run_id"] == "run-1"
-
-    @patch("src.init_job.handler.process_job_and_insert_orders")
-    def test_validation_error_returns_error(self, mock_process):
-        mock_process.return_value = {
-            "status": "error",
-            "errors": ["order[0]: cmds is empty"],
-            "run_id": "run-1",
-            "trace_id": "abc",
-        }
-
-        event = {"job_parameters_b64": _make_job_b64()}
-        resp = handler(event)
-        assert resp["status"] == "error"
+        assert "statusCode" not in resp
 
     @patch("src.init_job.handler.process_job_and_insert_orders")
     def test_exception_returns_error(self, mock_process):
         mock_process.side_effect = RuntimeError("boom")
 
-        event = {"job_parameters_b64": _make_job_b64()}
-        resp = handler(event)
+        resp = handler({"job_parameters_b64": _make_job_b64()})
         assert resp["status"] == "error"
         assert "boom" in resp["error"]
+        assert "statusCode" not in resp
+
+
+# ── handler (SNS) ────────────────────────────────────────────────
+
+class TestHandlerSNS:
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_sns_event_processed(self, mock_process):
+        mock_process.return_value = {"status": "ok", "run_id": "r1"}
+
+        payload = {"job_parameters_b64": _make_job_b64()}
+        event = {"Records": [{"Sns": {"Message": json.dumps(payload)}}]}
+        resp = handler(event)
+        assert resp["status"] == "ok"
+        assert "statusCode" not in resp
+
+
+# ── handler (API Gateway) ────────────────────────────────────────
+
+class TestHandlerAPIGateway:
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_apigw_post_returns_200(self, mock_process):
+        mock_process.return_value = {"status": "ok", "run_id": "r1"}
+
+        payload = {"job_parameters_b64": _make_job_b64()}
+        event = {"httpMethod": "POST", "body": json.dumps(payload)}
+        resp = handler(event)
+        assert resp["statusCode"] == 200
+        body = json.loads(resp["body"])
+        assert body["status"] == "ok"
+
+    def test_apigw_get_returns_405(self):
+        event = {"httpMethod": "GET", "body": "{}"}
+        resp = handler(event)
+        assert resp["statusCode"] == 405
+
+    def test_apigw_missing_payload_returns_400(self):
+        event = {"httpMethod": "POST", "body": "{}"}
+        resp = handler(event)
+        assert resp["statusCode"] == 400
+        body = json.loads(resp["body"])
+        assert "Missing" in body["error"]
+
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_apigw_error_returns_400(self, mock_process):
+        mock_process.return_value = {"status": "error", "errors": ["bad"]}
+
+        payload = {"job_parameters_b64": _make_job_b64()}
+        event = {"httpMethod": "POST", "body": json.dumps(payload)}
+        resp = handler(event)
+        assert resp["statusCode"] == 400
+
+    @patch("src.init_job.handler.process_job_and_insert_orders")
+    def test_apigw_exception_returns_500(self, mock_process):
+        mock_process.side_effect = RuntimeError("crash")
+
+        payload = {"job_parameters_b64": _make_job_b64()}
+        event = {"httpMethod": "POST", "body": json.dumps(payload)}
+        resp = handler(event)
+        assert resp["statusCode"] == 500
+        body = json.loads(resp["body"])
+        assert "crash" in body["error"]
 
 
 class TestProcessJobAndInsertOrders:
