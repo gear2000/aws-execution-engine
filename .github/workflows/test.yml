@@ -128,3 +128,32 @@ jobs:
       - name: Validate test workflow syntax
         run: |
           python -c "import yaml; yaml.safe_load(open('.github/workflows/test.yml'))"
+
+  integration-tests:
+    needs: script-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -f docker/Dockerfile.test -t iac-ci-tests .
+
+      - name: Run init_job integration tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/integration/test_init_job.py -v
+
+      - name: Run orchestrator integration tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/integration/test_orchestrator.py -v
+
+      - name: Run full run integration tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/integration/test_full_run.py -v
+
+      - name: Run failure scenario integration tests
+        run: |
+          docker run --rm iac-ci-tests \
+            tests/integration/test_failure_scenarios.py -v
