@@ -17,7 +17,7 @@ Test the full init_job flow using moto (mocked AWS):
 - Create a minimal job_parameters_b64 with 2 orders (no deps), both with cmds, timeout, and s3_location
 - Mock SOPS encrypt (subprocess)
 - Mock VCS PR comment creation (responses)
-- Invoke process_webhook handler with a synthetic API Gateway event
+- Invoke init_job handler with a synthetic API Gateway event
 - Verify:
   - Response contains run_id, trace_id, flow_id, done_endpt
   - Both orders exist in DynamoDB orders table with status=queued
@@ -52,7 +52,7 @@ Test the orchestrator flow using moto:
 Create tests/integration/test_full_run.py:
 
 Full end-to-end using moto:
-- Submit job via process_webhook handler:
+- Submit job via init_job handler:
   - 3 orders: order-1 (no deps), order-2 (no deps), order-3 (depends on 1+2)
 - Verify init_job completed (orders in DynamoDB, S3 trigger written)
 - Invoke orchestrator with init trigger S3 event

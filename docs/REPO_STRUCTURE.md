@@ -22,7 +22,7 @@ iac-ci/
 │   │       ├── base.py                # ABC interface for VCS providers
 │   │       └── github.py              # GitHub: PR comments, webhook verify
 │   │
-│   ├── process_webhook/               # Part 1: init_job
+│   ├── init_job/                      # Part 1: init_job
 │   │   ├── __init__.py
 │   │   ├── handler.py                 # Lambda entrypoint
 │   │   ├── validate.py                # Step 1: validate all orders
@@ -121,7 +121,7 @@ All Lambda functions use the same ECR image with different `image_config.command
 
 | Function | Command Override | Timeout | Memory |
 |---|---|---|---|
-| process_webhook | `src.process_webhook.handler.handler` | 300s | 512MB |
+| init_job | `src.init_job.handler.handler` | 300s | 512MB |
 | orchestrator | `src.orchestrator.handler.handler` | 600s | 512MB |
 | watchdog_check | `src.watchdog_check.handler.handler` | 60s | 256MB |
 | worker | `src.worker.handler.handler` | 600s | 1024MB |
@@ -167,7 +167,7 @@ CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 | `vcs/base.py` | ABC: create_comment, update_comment, find_comment_by_tag |
 | `vcs/github.py` | GitHub implementation + webhook signature verification |
 
-### src/process_webhook/
+### src/init_job/
 
 | File | Purpose |
 |---|---|

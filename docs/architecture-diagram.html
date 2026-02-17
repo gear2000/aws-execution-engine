@@ -651,7 +651,7 @@
           </div>
           <div class="component" style="flex: 1; min-width: 260px;">
             <span class="component-icon icon-lambda">&lambda;</span>
-            <div class="component-name">process_webhook</div>
+            <div class="component-name">init_job</div>
             <div class="component-detail">
               Validates orders &amp; dependencies<br>
               Fetches code (S3/Git), secrets (SSM/SecretsManager)<br>
@@ -807,7 +807,7 @@
             <div class="component-name">IAM Roles</div>
             <div class="component-detail">
               Per-function least privilege<br>
-              iac-ci-process-webhook-role<br>
+              iac-ci-init-job-role<br>
               iac-ci-orchestrator-role<br>
               iac-ci-worker-role<br>
               iac-ci-codebuild-role
@@ -827,7 +827,7 @@
     <!-- Part 1: init_job -->
     <div class="phase-sep">
       <div class="sep-line"></div>
-      <div class="sep-text">Part 1: init_job (process_webhook)</div>
+      <div class="sep-text">Part 1: init_job</div>
       <div class="sep-line"></div>
     </div>
 
@@ -845,7 +845,7 @@
         <div class="step-line"><div class="step-dot"></div><div class="step-connector"></div></div>
         <div class="step-content">
           <div class="step-label">2 &rsaquo; Validate &amp; repackage orders</div>
-          <div class="step-desc">process_webhook validates all orders, fetches code (S3/Git), retrieves secrets from SSM/Secrets Manager, encrypts credentials with SOPS, generates presigned S3 PUT URLs for worker callbacks</div>
+          <div class="step-desc">init_job validates all orders, fetches code (S3/Git), retrieves secrets from SSM/Secrets Manager, encrypts credentials with SOPS, generates presigned S3 PUT URLs for worker callbacks</div>
           <span class="step-tag tag-lambda">LAMBDA</span>
         </div>
       </div>
@@ -979,7 +979,7 @@
       <div class="resource-grid">
         <div class="resource-item">
           <span class="resource-icon icon-lambda">&lambda;</span>
-          <span class="resource-name">process_webhook</span>
+          <span class="resource-name">init_job</span>
           <span class="resource-meta">300s &middot; 512MB</span>
         </div>
         <div class="resource-item">

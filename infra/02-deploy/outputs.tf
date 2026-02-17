@@ -11,7 +11,7 @@ output "api_gateway_id" {
 output "lambda_function_names" {
   description = "Map of Lambda function names"
   value = {
-    process_webhook = aws_lambda_function.process_webhook.function_name
+    init_job        = aws_lambda_function.init_job.function_name
     orchestrator    = aws_lambda_function.orchestrator.function_name
     watchdog_check  = aws_lambda_function.watchdog_check.function_name
     worker          = aws_lambda_function.worker.function_name
@@ -21,7 +21,7 @@ output "lambda_function_names" {
 output "lambda_function_arns" {
   description = "Map of Lambda function ARNs"
   value = {
-    process_webhook = aws_lambda_function.process_webhook.arn
+    init_job        = aws_lambda_function.init_job.arn
     orchestrator    = aws_lambda_function.orchestrator.arn
     watchdog_check  = aws_lambda_function.watchdog_check.arn
     worker          = aws_lambda_function.worker.arn

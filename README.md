@@ -23,7 +23,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design.
 | S3 bucket (internal) | `iac-ci-internal-<hash>` | Exec bundles + callbacks, 1-day lifecycle |
 | S3 bucket (done) | `iac-ci-done-<hash>` | Completion markers, 1-day lifecycle |
 | ECR repository | `iac-ci` | Single Docker image for all functions |
-| Lambda functions (x4) | `iac-ci-process-webhook`, `iac-ci-orchestrator`, `iac-ci-watchdog-check`, `iac-ci-worker` | Same image, different entrypoints |
+| Lambda functions (x4) | `iac-ci-init-job`, `iac-ci-orchestrator`, `iac-ci-watchdog-check`, `iac-ci-worker` | Same image, different entrypoints |
 | API Gateway (HTTP) | `iac-ci` | POST /webhook |
 | DynamoDB tables (x3) | `iac-ci-orders`, `iac-ci-order-events`, `iac-ci-locks` | PAY_PER_REQUEST billing |
 | CodeBuild project | `iac-ci-worker` | For long-running orders |
