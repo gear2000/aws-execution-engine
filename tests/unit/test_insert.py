@@ -1,5 +1,8 @@
 """Unit tests for src/init_job/insert.py."""
 
+import base64
+import json
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -161,3 +164,50 @@ class TestInsertOrders:
         order2 = dynamodb.get_order("run-1", "0002", dynamodb_resource=ddb_resource)
         assert order2["dependencies"] == ["q1"]
         assert order2["queue_id"] == "q2"
+
+    def test_git_b64_includes_commit_hash(self, ddb_resource):
+        job = _make_job(
+            commit_hash="abc123",
+            orders=[
+                Order(cmds=["echo"], timeout=300, order_name="order-1"),
+            ],
+        )
+        repackaged = [
+            {"order_num": "0001", "order_name": "order-1", "callback_url": "https://cb"},
+        ]
+
+        insert_orders(
+            job=job,
+            run_id="run-1",
+            flow_id="flow",
+            trace_id="trace",
+            repackaged_orders=repackaged,
+            internal_bucket="bucket",
+            dynamodb_resource=ddb_resource,
+        )
+
+        order = dynamodb.get_order("run-1", "0001", dynamodb_resource=ddb_resource)
+        git_data = json.loads(base64.b64decode(order["git_b64"]).decode())
+        assert git_data["commit_hash"] == "abc123"
+
+    def test_git_b64_excludes_commit_hash_when_none(self, ddb_resource):
+        job = _make_job(orders=[
+            Order(cmds=["echo"], timeout=300, order_name="order-1"),
+        ])
+        repackaged = [
+            {"order_num": "0001", "order_name": "order-1", "callback_url": "https://cb"},
+        ]
+
+        insert_orders(
+            job=job,
+            run_id="run-1",
+            flow_id="flow",
+            trace_id="trace",
+            repackaged_orders=repackaged,
+            internal_bucket="bucket",
+            dynamodb_resource=ddb_resource,
+        )
+
+        order = dynamodb.get_order("run-1", "0001", dynamodb_resource=ddb_resource)
+        git_data = json.loads(base64.b64decode(order["git_b64"]).decode())
+        assert "commit_hash" not in git_data

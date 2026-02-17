@@ -27,6 +27,7 @@ class Order:
     order_name: Optional[str] = None
     git_repo: Optional[str] = None
     git_folder: Optional[str] = None
+    commit_hash: Optional[str] = None
     s3_location: Optional[str] = None
     env_vars: Optional[Dict[str, str]] = None
     ssm_paths: Optional[List[str]] = None
@@ -59,6 +60,7 @@ class Job:
     pr_number: Optional[int] = None
     issue_number: Optional[int] = None
     git_ssh_key_location: Optional[str] = None
+    commit_hash: Optional[str] = None
     flow_label: str = "exec"
     pr_comment_search_tag: Optional[str] = None
     presign_expiry: int = 7200
