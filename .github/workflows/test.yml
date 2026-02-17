@@ -24,3 +24,4 @@ jobs:
           python -m pytest tests/unit/test_s3.py -v
           python -m pytest tests/unit/test_sops.py -v
           python -m pytest tests/unit/test_vcs_github.py -v
+          python -m pytest tests/unit/test_vcs_helper.py -v
