@@ -1,6 +1,6 @@
 # Variables Reference
 
-Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `init_job` Lambda.
+Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `init_job` Lambda (via `POST /webhook`) or the `ssm_config` Lambda (via `POST /ssm`).
 
 ---
 
@@ -35,7 +35,9 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
 | `ssm_paths` | NO | List of AWS SSM Parameter Store paths to fetch |
 | `secret_manager_paths` | NO | List of AWS Secrets Manager paths to fetch |
 | `sops_key` | NO | SOPS encryption key. Auto-generated temp key if not provided |
-| `use_lambda` | NO | `true` = Lambda execution (faster, 10 min limit). `false` = CodeBuild. Default: `false` |
+| `execution_target` | NO | `"lambda"` (faster, 10 min limit), `"codebuild"` (long-running), or `"ssm"` (SSM Run Command). Default: `"codebuild"` |
+| `ssm_targets` | NO * | Target instances for SSM execution. Object with `instance_ids` (list) or `tags` (dict). * Required when `execution_target` is `"ssm"` |
+| `ssm_document_name` | NO | SSM Document to use. Default: `"iac-ci-run-commands"` |
 | `queue_id` | NO | Auto-generated if not provided. Used for dependency references |
 | `dependencies` | NO | List of `queue_id` values this order depends on |
 | `must_succeed` | NO | If `true` (default), failure of this order fails the entire job |
@@ -59,7 +61,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
       "git_folder": "terraform/vpc",
       "env_vars": {"TF_VAR_env": "staging"},
       "ssm_paths": ["/infra/staging/db-password"],
-      "use_lambda": true,
+      "execution_target": "lambda",
       "queue_id": "vpc-plan"
     },
     {
@@ -68,7 +70,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
       "timeout": 300,
       "git_folder": "terraform/rds",
       "secret_manager_paths": ["infra/staging/rds-creds"],
-      "use_lambda": true,
+      "execution_target": "lambda",
       "queue_id": "rds-plan",
       "dependencies": ["vpc-plan"]
     },
@@ -77,7 +79,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
       "cmds": ["./scripts/migrate.sh"],
       "timeout": 600,
       "s3_location": "s3://deploy-artifacts/migrations/v2.3.zip",
-      "use_lambda": false,
+      "execution_target": "codebuild",
       "dependencies": ["rds-plan"],
       "must_succeed": false
     }
@@ -85,7 +87,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
 }
 ```
 
-This payload is base64-encoded before being sent to the `init_job` Lambda.
+This payload is base64-encoded before being sent to the `init_job` Lambda via `POST /webhook`.
 
 ---
 
@@ -140,3 +142,89 @@ Content:
 ```
 
 Separate S3 bucket from internal — no access to order data.
+
+---
+
+## SSM Job Payload (POST /ssm)
+
+SSM orders use a separate entry point (`POST /ssm` -> `ssm_config` Lambda) with `SsmJob`/`SsmOrder` models. These orders do not use SOPS encryption -- credentials are passed as plain SSM command parameters.
+
+### SsmJob (Job-Level)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `username` | YES | Used in flow_id generation |
+| `git_repo` | NO | Repo to clone for code source |
+| `git_token_location` | NO | `aws:::ssm:<path>` or `aws:::secretd:<path>` |
+| `git_ssh_key_location` | NO | Alternative to token for SSH clone |
+| `commit_hash` | NO | Specific commit to checkout |
+| `flow_label` | NO | Suffix for flow_id. Defaults to `"ssm"` |
+| `presign_expiry` | NO | Presigned URL expiry in seconds. Default: 7200 |
+| `job_timeout` | NO | Timeout for the entire job. Default: 3600 |
+
+### SsmOrder (Per Order)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `cmds` | YES | List of shell commands |
+| `timeout` | YES | Per-order timeout in seconds |
+| `ssm_targets` | YES | Target instances: `{"instance_ids": [...]}` or `{"tags": {"Key": "Value"}}` |
+| `order_name` | NO | Derived if not provided |
+| `git_repo` | NO | Defaults to job-level `git_repo` |
+| `git_folder` | NO | Subfolder within repo |
+| `commit_hash` | NO | Specific commit to checkout |
+| `s3_location` | NO | S3 zip of execution files (alternative to git) |
+| `env_vars` | NO | Dict of extra environment variables |
+| `ssm_paths` | NO | List of AWS SSM Parameter Store paths to fetch |
+| `secret_manager_paths` | NO | List of AWS Secrets Manager paths to fetch |
+| `ssm_document_name` | NO | SSM Document to use. Default: `"iac-ci-run-commands"` |
+| `queue_id` | NO | Auto-generated if not provided |
+| `dependencies` | NO | List of `queue_id` values this order depends on |
+| `must_succeed` | NO | Default: `true` |
+
+### SSM Example Payload
+
+```json
+{
+  "username": "gear",
+  "git_repo": "org/infra-repo",
+  "git_token_location": "aws:::ssm:/iac-ci/github-token",
+  "orders": [
+    {
+      "order_name": "patch-webservers",
+      "cmds": ["yum update -y", "systemctl restart httpd"],
+      "timeout": 300,
+      "ssm_targets": {
+        "tags": {"Environment": "staging", "Role": "webserver"}
+      },
+      "env_vars": {"LOG_LEVEL": "info"},
+      "queue_id": "patch-web"
+    },
+    {
+      "order_name": "run-healthcheck",
+      "cmds": ["curl -sf http://localhost/health"],
+      "timeout": 60,
+      "ssm_targets": {
+        "instance_ids": ["i-0abc123def456", "i-0def789abc012"]
+      },
+      "dependencies": ["patch-web"]
+    }
+  ]
+}
+```
+
+This payload is base64-encoded before being sent to the `ssm_config` Lambda via `POST /ssm`:
+
+```bash
+curl -X POST "$API_GATEWAY_URL/ssm" \
+  -H "Content-Type: application/json" \
+  -d '{"job_parameters_b64": "<base64-encoded SSM job payload>"}'
+```
+
+### Key Differences from init_job Payload
+
+- No `pr_number`, `issue_number`, or `pr_comment_search_tag` -- SSM orders do not post PR comments
+- `ssm_targets` is required on every order (instance_ids or tags)
+- No `sops_key` field -- SSM orders do not use SOPS encryption
+- No `use_lambda` / `execution_target` field -- all SSM orders are automatically set to `execution_target: "ssm"`
+- `flow_label` defaults to `"ssm"` instead of `"exec"`

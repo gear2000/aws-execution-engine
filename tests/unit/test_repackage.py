@@ -8,13 +8,13 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.common.models import Job, Order
-from src.init_job.repackage import (
-    repackage_orders,
-    _extract_folder,
-    _group_git_orders,
-    _fetch_ssm_values,
-    _fetch_secret_values,
-    _zip_directory,
+from src.init_job.repackage import repackage_orders
+from src.common.code_source import (
+    extract_folder,
+    group_git_orders,
+    fetch_ssm_values,
+    fetch_secret_values,
+    zip_directory,
 )
 
 
@@ -48,7 +48,7 @@ class TestZipDirectory:
                 f.write("nested")
 
             zip_path = os.path.join(tmpdir, "output.zip")
-            _zip_directory(tmpdir, zip_path)
+            zip_directory(tmpdir, zip_path)
             assert os.path.exists(zip_path)
             assert os.path.getsize(zip_path) > 0
 
@@ -59,7 +59,7 @@ class TestExtractFolder:
             with open(os.path.join(clone_dir, "main.tf"), "w") as f:
                 f.write("resource {}")
 
-            result = _extract_folder(clone_dir)
+            result = extract_folder(clone_dir)
             try:
                 assert os.path.isdir(result)
                 assert os.path.exists(os.path.join(result, "main.tf"))
@@ -74,7 +74,7 @@ class TestExtractFolder:
             with open(os.path.join(clone_dir, "root.txt"), "w") as f:
                 f.write("root")
 
-            result = _extract_folder(clone_dir, "vpc")
+            result = extract_folder(clone_dir, "vpc")
             try:
                 assert os.path.exists(os.path.join(result, "main.tf"))
                 # root.txt should NOT be present (only vpc/ contents copied)
@@ -90,7 +90,7 @@ class TestExtractFolder:
             with open(os.path.join(clone_dir, "main.tf"), "w") as f:
                 f.write("resource {}")
 
-            result = _extract_folder(clone_dir)
+            result = extract_folder(clone_dir)
             try:
                 assert os.path.exists(os.path.join(result, "main.tf"))
                 assert not os.path.exists(os.path.join(result, ".git"))
@@ -100,7 +100,7 @@ class TestExtractFolder:
     def test_missing_folder_raises(self):
         with tempfile.TemporaryDirectory() as clone_dir:
             with pytest.raises(FileNotFoundError, match="nonexistent"):
-                _extract_folder(clone_dir, "nonexistent")
+                extract_folder(clone_dir, "nonexistent")
 
 
 class TestGroupGitOrders:
@@ -109,7 +109,7 @@ class TestGroupGitOrders:
             _make_order(order_name="a", git_folder="vpc"),
             _make_order(order_name="b", git_folder="rds"),
         ])
-        git_groups, s3_indices = _group_git_orders(job)
+        git_groups, s3_indices = group_git_orders(job.orders, job)
         assert len(git_groups) == 1
         assert len(s3_indices) == 0
         key = ("org/repo", None)
@@ -120,7 +120,7 @@ class TestGroupGitOrders:
             _make_order(order_name="a", git_repo="org/repo-a"),
             _make_order(order_name="b", git_repo="org/repo-b"),
         ])
-        git_groups, s3_indices = _group_git_orders(job)
+        git_groups, s3_indices = group_git_orders(job.orders, job)
         assert len(git_groups) == 2
 
     def test_same_repo_different_commits_separate(self):
@@ -128,7 +128,7 @@ class TestGroupGitOrders:
             _make_order(order_name="a", commit_hash="abc123"),
             _make_order(order_name="b", commit_hash="def456"),
         ])
-        git_groups, s3_indices = _group_git_orders(job)
+        git_groups, s3_indices = group_git_orders(job.orders, job)
         assert len(git_groups) == 2
 
     def test_job_level_commit_hash_groups_orders(self):
@@ -139,7 +139,7 @@ class TestGroupGitOrders:
                 _make_order(order_name="b", git_folder="rds"),
             ],
         )
-        git_groups, s3_indices = _group_git_orders(job)
+        git_groups, s3_indices = group_git_orders(job.orders, job)
         assert len(git_groups) == 1
         key = ("org/repo", "abc123")
         assert len(git_groups[key]) == 2
@@ -149,15 +149,15 @@ class TestGroupGitOrders:
             _make_order(order_name="git-order", git_folder="vpc"),
             _make_order(order_name="s3-order", s3_location="s3://bucket/code.zip"),
         ])
-        git_groups, s3_indices = _group_git_orders(job)
+        git_groups, s3_indices = group_git_orders(job.orders, job)
         assert len(git_groups) == 1
         assert s3_indices == [1]
 
 
 class TestRepackageOrders:
-    @patch("src.init_job.repackage._clone_repo")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.clone_repo")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_repackage_produces_correct_structure(
@@ -205,9 +205,9 @@ class TestRepackageOrders:
             assert call_kwargs["trace_id"] == "abc123"
             assert call_kwargs["ssm_values"] == {"DB_PASS": "secret"}
 
-    @patch("src.init_job.repackage._fetch_code_s3")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.fetch_code_s3")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_s3_code_source(
@@ -239,9 +239,9 @@ class TestRepackageOrders:
             assert len(results) == 1
             mock_s3.assert_called_once_with("s3://bucket/code.zip")
 
-    @patch("src.init_job.repackage._clone_repo")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.clone_repo")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_multiple_orders_same_repo_clones_once(
@@ -283,9 +283,9 @@ class TestRepackageOrders:
             # KEY: only one clone despite two orders
             mock_clone.assert_called_once()
 
-    @patch("src.init_job.repackage._clone_repo")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.clone_repo")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_different_repos_clone_separately(
@@ -327,9 +327,9 @@ class TestRepackageOrders:
         for d in created_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
-    @patch("src.init_job.repackage._clone_repo")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.clone_repo")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_same_repo_different_commits_clone_separately(
@@ -371,9 +371,9 @@ class TestRepackageOrders:
         for d in created_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
-    @patch("src.init_job.repackage._clone_repo")
-    @patch("src.init_job.repackage._fetch_ssm_values")
-    @patch("src.init_job.repackage._fetch_secret_values")
+    @patch("src.init_job.repackage.clone_repo")
+    @patch("src.init_job.repackage.fetch_ssm_values")
+    @patch("src.init_job.repackage.fetch_secret_values")
     @patch("src.init_job.repackage.s3_ops.generate_callback_presigned_url")
     @patch("src.init_job.repackage.OrderBundler")
     def test_job_level_commit_hash_groups_orders(

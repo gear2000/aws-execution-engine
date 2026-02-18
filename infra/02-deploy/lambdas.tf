@@ -51,6 +51,7 @@ resource "aws_lambda_function" "orchestrator" {
       IAC_CI_WORKER_LAMBDA     = "iac-ci-worker"
       IAC_CI_CODEBUILD_PROJECT = aws_codebuild_project.worker.name
       IAC_CI_WATCHDOG_SFN      = aws_sfn_state_machine.watchdog.arn
+      IAC_CI_SSM_DOCUMENT      = aws_ssm_document.run_commands.name
     })
   }
 }
@@ -86,6 +87,25 @@ resource "aws_lambda_function" "worker" {
 
   image_config {
     command = ["src.worker.handler.handler"]
+  }
+
+  environment {
+    variables = local.lambda_env
+  }
+}
+
+# --- ssm_config ---
+
+resource "aws_lambda_function" "ssm_config" {
+  function_name = "iac-ci-ssm-config"
+  role          = aws_iam_role.ssm_config.arn
+  package_type  = "Image"
+  image_uri     = local.image_uri
+  timeout       = 300
+  memory_size   = 512
+
+  image_config {
+    command = ["src.ssm_config.handler.handler"]
   }
 
   environment {

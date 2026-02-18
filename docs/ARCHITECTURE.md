@@ -2,12 +2,13 @@
 
 ## System Overview
 
-iac-ci is a generic, event-driven execution system. It receives jobs containing orders, queues them, and executes them via AWS Lambda or CodeBuild with dependency resolution, cross-account credential management, and VCS PR tracking.
+iac-ci is a generic, event-driven execution system. It receives jobs containing orders, queues them, and executes them via AWS Lambda, CodeBuild, or SSM Run Command with dependency resolution, cross-account credential management, and VCS PR tracking.
 
-The system is split into two flows:
+The system is split into three flows:
 
-- **Part 1 (init_job):** Receive, validate, package, and queue orders
-- **Part 2 (execute_orders):** Orchestrate execution of queued orders
+- **Part 1 (init_job):** Receive, validate, package (with SOPS), and queue Lambda/CodeBuild orders
+- **Part 1b (ssm_config):** Receive, validate, package (no SOPS), and queue SSM Run Command orders
+- **Part 2 (execute_orders):** Orchestrate execution of queued orders across all three targets
 
 ---
 
@@ -27,7 +28,8 @@ Commands are resolved before entering this system. For example, an IAC layer tra
                          │ cmds[] already resolved
                          ▼
                   API Gateway (default)
-                  POST /webhook
+                  POST /webhook   → init_job Lambda
+                  POST /ssm       → ssm_config Lambda
                   GitHub webhook signature verification
 ```
 
@@ -91,7 +93,7 @@ Orders table — Key: <run_id>:<order_num>
 
 Fields:
   trace_id, flow_id, order_name, cmds, queue_id,
-  s3_location, callback_url, use_lambda,
+  s3_location, callback_url, execution_target,
   git (repo, token_loc, ssh_key_loc, folder) as b64,
   dependencies, status ("queued"), created_at, last_update,
   timeout, must_succeed (default: true),
@@ -134,6 +136,97 @@ done_endpt
 pr_search_tag
 init_pr_comment
 ```
+
+---
+
+## Part 1b: ssm_config (SSM Config Provider Lambda)
+
+Separate construction point for SSM Run Command orders. Receives jobs via `POST /ssm`, uses `SsmJob`/`SsmOrder` models instead of `Job`/`Order`, and does not use SOPS encryption.
+
+### Flow
+
+```
+process_ssm_job()
+
+inputs:
+  - job_parameters_b64 (SsmJob payload)
+  - trace_id (auto-gen if missing)
+  - run_id (auto-gen if missing)
+  - done_endpt (auto-gen if missing)
+```
+
+**Step 1: Validate SSM Orders**
+
+```
+Validate each order:
+  - cmds[] exists and non-empty
+  - timeout present and positive
+  - ssm_targets is present
+  - ssm_targets contains 'instance_ids' or 'tags'
+
+Any failure → error out (fail fast)
+```
+
+**Step 2: Repackage (No SOPS)**
+
+```
+For each order:
+  - get code (s3 or git) — same code_source logic as init_job
+  - fetch SSM/Secrets Manager values (plain, not SOPS-encrypted)
+  - generate presigned S3 PUT URL for callback
+  - merge all with env_vars into env_dict
+  - write cmds.json + env_vars.json into code dir
+  - zip into exec.zip
+
+No SOPS encryption — credentials passed via SSM command parameters.
+```
+
+**Step 3: Upload to S3**
+
+```
+s3://<internal-bucket>/tmp/exec/<run_id>/<order_num>/exec.zip
+(reuses init_job upload logic)
+```
+
+**Step 4: Insert Orders to DynamoDB**
+
+```
+Orders table — Key: <run_id>:<order_num>
+
+Fields:
+  trace_id, flow_id, order_name, cmds, queue_id,
+  s3_location, callback_url, execution_target ("ssm"),
+  ssm_targets, ssm_document_name (optional),
+  env_dict (plain, not SOPS),
+  dependencies, status ("queued"), created_at, last_update,
+  timeout, must_succeed (default: true)
+```
+
+**Step 5: Kick Off Orchestrator**
+
+```
+Write init trigger:
+  s3://<internal-bucket>/tmp/callbacks/runs/<run_id>/0000/result.json
+
+S3 event fires → orchestrator Lambda invoked
+(same mechanism as init_job)
+```
+
+**Response**
+
+```
+HTTP 200/400
+run_id
+trace_id
+flow_id
+done_endpt
+```
+
+**Key differences from init_job:**
+- No SOPS encryption — env vars and credentials are passed as plain SSM command parameters
+- No PR comment step — SSM orders are typically infrastructure-level, not PR-driven
+- Uses `SsmJob`/`SsmOrder` models with SSM-specific fields (`ssm_targets`, `ssm_document_name`)
+- Orders always get `execution_target: "ssm"` in DynamoDB
 
 ---
 
@@ -194,8 +287,13 @@ For each "queued" order:
 
 ```
 For each ready order:
-  - use_lambda=true  → invoke worker Lambda
-  - use_lambda=false → start CodeBuild
+  - execution_target="lambda"    → invoke worker Lambda
+  - execution_target="codebuild" → start CodeBuild project
+  - execution_target="ssm"       → send SSM Run Command
+
+  Backward compat: if use_lambda is present but execution_target is not,
+    use_lambda=true  → lambda
+    use_lambda=false → codebuild
 
   - Start watchdog Step Function for this order
   - Update orders table: status → running
@@ -254,6 +352,35 @@ Same code runs in Lambda and CodeBuild Docker container.
 ```
 
 No IAM role switching. Worker only operates with target account credentials from SOPS. Worker needs ssm:GetParameter on /iac-ci/sops-keys/* to fetch the decryption key. Callback uses presigned URL (no additional AWS permissions needed).
+
+---
+
+## SSM Run Command Execution
+
+For orders with `execution_target: "ssm"`, the orchestrator sends an SSM Run Command instead of invoking Lambda or CodeBuild.
+
+```
+1. Orchestrator calls ssm:SendCommand with:
+   - DocumentName: order-level ssm_document_name OR default "iac-ci-run-commands"
+   - Targets: instance_ids or tag-based targeting from ssm_targets
+   - Parameters:
+       Commands:    JSON array of shell commands
+       CallbackUrl: presigned S3 PUT URL
+       Timeout:     order timeout in seconds
+       EnvVars:     JSON object of env vars (credentials included, plain text)
+       S3Location:  S3 URI for exec.zip (optional)
+
+2. SSM Document (iac-ci-run-commands) on target instance:
+   - Export env vars from EnvVars parameter
+   - Download and extract exec.zip from S3 (if provided)
+   - Execute commands sequentially
+   - Capture exit code + stdout/stderr
+   - PUT result.json to CallbackUrl (presigned URL)
+
+3. S3 event fires → orchestrator re-triggered
+```
+
+No SOPS. Credentials and env vars are passed directly as SSM command parameters. The SSM document handles env var export, command execution, and callback — same result.json contract as Lambda/CodeBuild workers.
 
 ---
 
@@ -356,9 +483,11 @@ PK: <run_id>:<order_num>
 TTL: 1 day
 
 Fields: trace_id, flow_id, order_name, cmds, queue_id,
-s3_location, callback_url, use_lambda, git (b64),
+s3_location, callback_url, execution_target, git (b64),
 dependencies, status, created_at, last_update, timeout,
-must_succeed, execution_url, step_function_url
+must_succeed, execution_url, step_function_url,
+ssm_targets (SSM only), ssm_document_name (SSM only),
+env_dict (SSM only, plain credentials)
 ```
 
 ### Order Events

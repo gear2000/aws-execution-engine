@@ -1,4 +1,4 @@
-"""Dispatch ready orders to Lambda or CodeBuild."""
+"""Dispatch ready orders to Lambda, CodeBuild, or SSM."""
 
 import json
 import logging
@@ -48,6 +48,47 @@ def _dispatch_codebuild(order: dict, run_id: str, internal_bucket: str) -> str:
     return resp.get("build", {}).get("id", "")
 
 
+def _dispatch_ssm(order: dict, run_id: str, internal_bucket: str) -> str:
+    """Send SSM Run Command for an order. Returns command ID."""
+    ssm_client = boto3.client("ssm")
+    document_name = order.get("ssm_document_name") or os.environ.get(
+        "IAC_CI_SSM_DOCUMENT", "iac-ci-run-commands"
+    )
+
+    parameters = {
+        "Commands": [json.dumps(order.get("cmds", []))],
+        "CallbackUrl": [order.get("callback_url", "")],
+        "Timeout": [str(order.get("timeout", 300))],
+    }
+
+    env_dict = order.get("env_dict", {})
+    if env_dict:
+        parameters["EnvVars"] = [json.dumps(env_dict)]
+
+    s3_location = order.get("s3_location", "")
+    if s3_location:
+        parameters["S3Location"] = [s3_location]
+
+    ssm_targets = order.get("ssm_targets", {})
+    send_kwargs = {
+        "DocumentName": document_name,
+        "Parameters": parameters,
+        "TimeoutSeconds": order.get("timeout", 300),
+        "Comment": f"iac-ci run_id={run_id} order={order.get('order_num', '')}",
+    }
+
+    if ssm_targets.get("instance_ids"):
+        send_kwargs["InstanceIds"] = ssm_targets["instance_ids"]
+    elif ssm_targets.get("tags"):
+        send_kwargs["Targets"] = [
+            {"Key": f"tag:{k}", "Values": [v] if isinstance(v, str) else v}
+            for k, v in ssm_targets["tags"].items()
+        ]
+
+    resp = ssm_client.send_command(**send_kwargs)
+    return resp.get("Command", {}).get("CommandId", "")
+
+
 def _start_watchdog(
     order: dict,
     run_id: str,
@@ -84,13 +125,20 @@ def _dispatch_single(
     internal_bucket: str,
     dynamodb_resource=None,
 ) -> dict:
-    """Dispatch a single order (Lambda or CodeBuild) + start watchdog."""
+    """Dispatch a single order (Lambda, CodeBuild, or SSM) + start watchdog."""
     order_num = order.get("order_num", "")
     order_name = order.get("order_name", order_num)
 
+    # Determine execution target with backward compat
+    execution_target = order.get("execution_target", "codebuild")
+    if "use_lambda" in order and "execution_target" not in order:
+        execution_target = "lambda" if order["use_lambda"] else "codebuild"
+
     # Dispatch to execution environment
-    if order.get("use_lambda"):
+    if execution_target == "lambda":
         execution_id = _dispatch_lambda(order, run_id, internal_bucket)
+    elif execution_target == "ssm":
+        execution_id = _dispatch_ssm(order, run_id, internal_bucket)
     else:
         execution_id = _dispatch_codebuild(order, run_id, internal_bucket)
 

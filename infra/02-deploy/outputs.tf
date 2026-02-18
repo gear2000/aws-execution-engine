@@ -15,6 +15,7 @@ output "lambda_function_names" {
     orchestrator    = aws_lambda_function.orchestrator.function_name
     watchdog_check  = aws_lambda_function.watchdog_check.function_name
     worker          = aws_lambda_function.worker.function_name
+    ssm_config      = aws_lambda_function.ssm_config.function_name
   }
 }
 
@@ -25,6 +26,7 @@ output "lambda_function_arns" {
     orchestrator    = aws_lambda_function.orchestrator.arn
     watchdog_check  = aws_lambda_function.watchdog_check.arn
     worker          = aws_lambda_function.worker.arn
+    ssm_config      = aws_lambda_function.ssm_config.arn
   }
 }
 
@@ -53,4 +55,9 @@ output "step_function_arn" {
 output "codebuild_project_name" {
   description = "CodeBuild project name"
   value       = aws_codebuild_project.worker.name
+}
+
+output "ssm_document_name" {
+  description = "SSM Document name for command execution"
+  value       = aws_ssm_document.run_commands.name
 }

@@ -15,6 +15,8 @@ def upload_orders(
     Expected path: tmp/exec/<run_id>/<order_num>/exec.zip
     """
     for order_info in repackaged_orders:
+        if order_info.get("zip_path") is None:
+            continue
         s3_ops.upload_exec_zip(
             bucket=bucket,
             run_id=run_id,

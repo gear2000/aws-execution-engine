@@ -64,7 +64,7 @@ class TestDispatchSingle:
         order = {
             "order_num": "0001",
             "order_name": "test",
-            "use_lambda": True,
+            "execution_target": "lambda",
             "s3_location": "s3://bucket/exec.zip",
             "timeout": 300,
         }
@@ -95,7 +95,7 @@ class TestDispatchSingle:
         order = {
             "order_num": "0001",
             "order_name": "test",
-            "use_lambda": False,
+            "execution_target": "codebuild",
             "s3_location": "s3://bucket/exec.zip",
             "timeout": 300,
         }
@@ -106,6 +106,92 @@ class TestDispatchSingle:
         )
 
         assert result["execution_id"] == "build-123"
+        mock_cb.assert_called_once()
+
+    @patch("src.orchestrator.dispatch._start_watchdog")
+    @patch("src.orchestrator.dispatch._dispatch_ssm")
+    def test_ssm_dispatch(self, mock_ssm, mock_watchdog, ddb_resource):
+        mock_ssm.return_value = "cmd-123"
+        mock_watchdog.return_value = "arn:sfn:exec-3"
+
+        dynamodb.put_order("run-1", "0001", {
+            "order_name": "test", "status": "queued",
+        }, dynamodb_resource=ddb_resource)
+
+        order = {
+            "order_num": "0001",
+            "order_name": "test",
+            "execution_target": "ssm",
+            "s3_location": "s3://bucket/exec.zip",
+            "timeout": 300,
+            "ssm_targets": {"instance_ids": ["i-abc123"]},
+        }
+
+        result = _dispatch_single(
+            order, "run-1", "flow-1", "trace-1",
+            "test-internal", dynamodb_resource=ddb_resource,
+        )
+
+        assert result["execution_id"] == "cmd-123"
+        mock_ssm.assert_called_once()
+        mock_watchdog.assert_called_once()
+
+        # Verify order updated to running
+        updated = dynamodb.get_order("run-1", "0001", dynamodb_resource=ddb_resource)
+        assert updated["status"] == RUNNING
+
+    @patch("src.orchestrator.dispatch._start_watchdog")
+    @patch("src.orchestrator.dispatch._dispatch_lambda")
+    def test_backward_compat_use_lambda_true(self, mock_lambda, mock_watchdog, ddb_resource):
+        """Legacy use_lambda=True should route to Lambda dispatch."""
+        mock_lambda.return_value = "req-compat"
+        mock_watchdog.return_value = "arn:sfn:exec-compat"
+
+        dynamodb.put_order("run-1", "0001", {
+            "order_name": "test", "status": "queued",
+        }, dynamodb_resource=ddb_resource)
+
+        order = {
+            "order_num": "0001",
+            "order_name": "test",
+            "use_lambda": True,
+            "s3_location": "s3://bucket/exec.zip",
+            "timeout": 300,
+        }
+
+        result = _dispatch_single(
+            order, "run-1", "flow-1", "trace-1",
+            "test-internal", dynamodb_resource=ddb_resource,
+        )
+
+        assert result["execution_id"] == "req-compat"
+        mock_lambda.assert_called_once()
+
+    @patch("src.orchestrator.dispatch._start_watchdog")
+    @patch("src.orchestrator.dispatch._dispatch_codebuild")
+    def test_backward_compat_use_lambda_false(self, mock_cb, mock_watchdog, ddb_resource):
+        """Legacy use_lambda=False should route to CodeBuild dispatch."""
+        mock_cb.return_value = "build-compat"
+        mock_watchdog.return_value = "arn:sfn:exec-compat"
+
+        dynamodb.put_order("run-1", "0001", {
+            "order_name": "test", "status": "queued",
+        }, dynamodb_resource=ddb_resource)
+
+        order = {
+            "order_num": "0001",
+            "order_name": "test",
+            "use_lambda": False,
+            "s3_location": "s3://bucket/exec.zip",
+            "timeout": 300,
+        }
+
+        result = _dispatch_single(
+            order, "run-1", "flow-1", "trace-1",
+            "test-internal", dynamodb_resource=ddb_resource,
+        )
+
+        assert result["execution_id"] == "build-compat"
         mock_cb.assert_called_once()
 
 
@@ -124,7 +210,7 @@ class TestDispatchOrders:
 
         orders = [
             {"order_num": f"000{i+1}", "order_name": f"order-{i}",
-             "use_lambda": True, "s3_location": "s3://b/e.zip", "timeout": 300}
+             "execution_target": "lambda", "s3_location": "s3://b/e.zip", "timeout": 300}
             for i in range(3)
         ]
 

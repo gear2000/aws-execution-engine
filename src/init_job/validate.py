@@ -2,7 +2,7 @@
 
 from typing import List
 
-from src.common.models import Job
+from src.common.models import EXECUTION_TARGETS, Job
 
 
 def validate_orders(job: Job) -> List[str]:
@@ -23,6 +23,11 @@ def validate_orders(job: Job) -> List[str]:
         # timeout must be present and positive
         if not order.timeout or order.timeout <= 0:
             return [f"{order_label}: timeout is missing or invalid"]
+
+        # execution_target must be valid
+        if order.execution_target not in EXECUTION_TARGETS:
+            return [f"{order_label}: invalid execution_target '{order.execution_target}' "
+                    f"(must be one of {sorted(EXECUTION_TARGETS)})"]
 
         # Must have a code source: s3_location OR (git_repo + git_token_location from job)
         has_s3 = bool(order.s3_location)
