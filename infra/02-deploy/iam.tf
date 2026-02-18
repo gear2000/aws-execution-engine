@@ -133,6 +133,14 @@ resource "aws_iam_role_policy" "orchestrator" {
         Action   = ["states:StartExecution"]
         Resource = aws_sfn_state_machine.watchdog.arn
       },
+      {
+        Effect = "Allow"
+        Action = ["ssm:SendCommand"]
+        Resource = [
+          aws_ssm_document.run_commands.arn,
+          "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
+        ]
+      },
     ]
   })
 }
@@ -269,4 +277,54 @@ resource "aws_iam_role_policy" "codebuild" {
       },
     ]
   })
+}
+
+# ============================================================
+# ssm_config
+# ============================================================
+
+resource "aws_iam_role" "ssm_config" {
+  name               = "iac-ci-ssm-config"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+resource "aws_iam_role_policy" "ssm_config" {
+  name = "iac-ci-ssm-config"
+  role = aws_iam_role.ssm_config.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query"]
+        Resource = [
+          aws_dynamodb_table.orders.arn,
+          aws_dynamodb_table.order_events.arn,
+          "${aws_dynamodb_table.order_events.arn}/index/*",
+        ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.internal.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ssm_config_logs" {
+  name   = "logs"
+  role   = aws_iam_role.ssm_config.id
+  policy = data.aws_iam_policy_document.lambda_logs.json
 }

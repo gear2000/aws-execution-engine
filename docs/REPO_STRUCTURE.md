@@ -17,6 +17,7 @@ iac-ci/
 │   │   ├── dynamodb.py                # orders, order_events, locks CRUD
 │   │   ├── s3.py                      # upload, presign, read result.json
 │   │   ├── sops.py                    # encrypt, decrypt, repackage
+│   │   ├── code_source.py             # git clone, S3 fetch, credential retrieval, zip (shared)
 │   │   └── vcs/
 │   │       ├── __init__.py
 │   │       ├── base.py                # ABC interface for VCS providers
@@ -37,19 +38,27 @@ iac-ci/
 │   │   ├── lock.py                    # acquire/release run_id lock
 │   │   ├── read_state.py              # Step 1: read orders + S3 results
 │   │   ├── evaluate.py                # Step 2: dependency resolution
-│   │   ├── dispatch.py                # Step 3: invoke Lambda/CodeBuild + watchdog
+│   │   ├── dispatch.py                # Step 3: invoke Lambda/CodeBuild/SSM + watchdog
 │   │   └── finalize.py                # Step 5: done endpoint + PR summary
 │   │
 │   ├── watchdog_check/                # timeout safety net
 │   │   ├── __init__.py
 │   │   └── handler.py                 # check result.json or write timed_out
 │   │
-│   └── worker/                        # dual-purpose: Lambda + CodeBuild
+│   ├── worker/                        # dual-purpose: Lambda + CodeBuild
+│   │   ├── __init__.py
+│   │   ├── handler.py                 # Lambda entrypoint
+│   │   ├── entrypoint.sh              # CodeBuild CMD (calls run.py)
+│   │   ├── run.py                     # shared: unpack, execute, callback
+│   │   └── callback.py                # PUT result.json to presigned URL
+│   │
+│   └── ssm_config/                    # SSM config provider (Part 1b)
 │       ├── __init__.py
-│       ├── handler.py                 # Lambda entrypoint
-│       ├── entrypoint.sh              # CodeBuild CMD (calls run.py)
-│       ├── run.py                     # shared: unpack, execute, callback
-│       └── callback.py                # PUT result.json to presigned URL
+│       ├── handler.py                 # Lambda entrypoint (POST /ssm)
+│       ├── models.py                  # SsmJob/SsmOrder dataclasses
+│       ├── validate.py                # Validate SSM orders (targets, cmds, timeout)
+│       ├── repackage.py               # Package code + creds, no SOPS
+│       └── insert.py                  # Insert SSM orders to DynamoDB
 │
 ├── docker/
 │   └── Dockerfile                     # single image, all functions
@@ -69,12 +78,13 @@ iac-ci/
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
-│       ├── api_gateway.tf             # HTTP API + POST /webhook
-│       ├── lambdas.tf                 # 4 Lambda functions (all ECR image)
+│       ├── api_gateway.tf             # HTTP API + POST /webhook + POST /ssm
+│       ├── lambdas.tf                 # 5 Lambda functions (all ECR image)
 │       ├── step_functions.tf          # watchdog state machine
 │       ├── dynamodb.tf                # orders, order_events (+GSI), locks
 │       ├── s3.tf                      # internal + done buckets + lifecycles
 │       ├── codebuild.tf               # project definition (ECR image)
+│       ├── ssm_document.tf            # SSM Document (iac-ci-run-commands)
 │       ├── iam.tf                     # all IAM roles
 │       └── s3_notifications.tf        # S3 event → orchestrator Lambda
 │
@@ -125,6 +135,7 @@ All Lambda functions use the same ECR image with different `image_config.command
 | orchestrator | `src.orchestrator.handler.handler` | 600s | 512MB |
 | watchdog_check | `src.watchdog_check.handler.handler` | 60s | 256MB |
 | worker | `src.worker.handler.handler` | 600s | 1024MB |
+| ssm_config | `src.ssm_config.handler.handler` | 300s | 512MB |
 
 CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 
@@ -164,6 +175,7 @@ CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 | `dynamodb.py` | CRUD for orders, order_events, locks tables |
 | `s3.py` | Upload exec.zip, generate presigned URLs, read result.json, write done endpoint |
 | `sops.py` | Encrypt env_vars + creds into SOPS bundle, decrypt, auto-gen temp keys |
+| `code_source.py` | Shared code source operations: git clone, S3 fetch, credential retrieval (SSM/Secrets Manager), zip (extracted from init_job/repackage.py) |
 | `vcs/base.py` | ABC: create_comment, update_comment, find_comment_by_tag |
 | `vcs/github.py` | GitHub implementation + webhook signature verification |
 
@@ -186,7 +198,7 @@ CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 | `lock.py` | Acquire/release DynamoDB lock for run_id |
 | `read_state.py` | Query orders table + check S3 for result.json files |
 | `evaluate.py` | Dependency resolution, determine ready/failed/waiting orders |
-| `dispatch.py` | Invoke Lambda or start CodeBuild, start watchdog SF, update status |
+| `dispatch.py` | Invoke Lambda, start CodeBuild, or send SSM Run Command; start watchdog SF, update status |
 | `finalize.py` | Write done endpoint, final PR comment, job-level order_event, release lock |
 
 ### src/watchdog_check/
@@ -203,3 +215,13 @@ CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 | `entrypoint.sh` | CodeBuild CMD, calls run.py via python |
 | `run.py` | Fetch exec.zip, unpack SOPS, execute cmds, capture stdout/stderr |
 | `callback.py` | PUT result.json to presigned S3 URL |
+
+### src/ssm_config/
+
+| File | Purpose |
+|---|---|
+| `handler.py` | Lambda entrypoint for POST /ssm, calls process_ssm_job |
+| `models.py` | SsmJob and SsmOrder dataclasses (separate from common models) |
+| `validate.py` | Validate SSM orders: cmds, timeout, ssm_targets (instance_ids or tags) |
+| `repackage.py` | Package code + fetch credentials (no SOPS), write cmds.json + env_vars.json, zip |
+| `insert.py` | Insert SSM orders into DynamoDB with execution_target="ssm", ssm_targets, env_dict |

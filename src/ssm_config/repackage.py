@@ -1,5 +1,6 @@
-"""Repackage orders with credentials and encrypted env vars."""
+"""Repackage SSM orders — package code, fetch credentials, no SOPS."""
 
+import json
 import os
 import shutil
 import tempfile
@@ -15,13 +16,13 @@ from src.common.code_source import (
     fetch_code_s3,
     zip_directory,
 )
-from src.common.models import Job, Order
 from src.common import s3 as s3_ops
+from src.ssm_config.models import SsmJob, SsmOrder
 
 
-def _process_order(
-    job: Job,
-    order: Order,
+def _process_ssm_order(
+    job: SsmJob,
+    order: SsmOrder,
     order_index: int,
     code_dir: str,
     run_id: str,
@@ -29,7 +30,7 @@ def _process_order(
     flow_id: str,
     internal_bucket: str,
 ) -> Dict:
-    """Process a single order: fetch credentials, bundle, zip."""
+    """Process a single SSM order: fetch credentials, build env dict, zip code."""
     order_num = str(order_index + 1).zfill(4)
     order_name = order.order_name or f"order-{order_num}"
 
@@ -45,7 +46,7 @@ def _process_order(
         expiry=job.presign_expiry,
     )
 
-    # Build and encrypt with OrderBundler
+    # Build merged env dict (no SOPS encryption)
     bundler = OrderBundler(
         run_id=run_id,
         order_id=order_name,
@@ -57,9 +58,15 @@ def _process_order(
         secret_values=secret_values,
         callback_url=callback_url,
     )
-    bundler.repackage(code_dir, sops_key=order.sops_key)
+    env_dict = bundler.build_env()
 
-    # Re-zip
+    # Write cmds.json and env_vars.json into code dir for the SSM document
+    with open(os.path.join(code_dir, "cmds.json"), "w") as f:
+        json.dump(order.cmds, f)
+    with open(os.path.join(code_dir, "env_vars.json"), "w") as f:
+        json.dump(env_dict, f)
+
+    # Zip
     zip_path = os.path.join(tempfile.gettempdir(), f"{run_id}_{order_num}_exec.zip")
     zip_directory(code_dir, zip_path)
 
@@ -69,22 +76,21 @@ def _process_order(
         "zip_path": zip_path,
         "callback_url": callback_url,
         "code_dir": code_dir,
+        "env_dict": env_dict,
     }
 
 
-def repackage_orders(
-    job: Job,
+def repackage_ssm_orders(
+    job: SsmJob,
     run_id: str,
     trace_id: str,
     flow_id: str,
     internal_bucket: str,
 ) -> List[Dict]:
-    """Repackage all orders with credentials and SOPS encryption.
-
-    Groups git-sourced orders by (repo, commit_hash) to avoid redundant clones.
+    """Repackage all SSM orders — package code, fetch credentials, no SOPS.
 
     Returns list of dicts with keys:
-        order_num, order_name, zip_path, callback_url, code_dir
+        order_num, order_name, zip_path, callback_url, code_dir, env_dict
     """
     results: List[Optional[Dict]] = [None] * len(job.orders)
     shared_clone_dirs: List[str] = []
@@ -94,9 +100,10 @@ def repackage_orders(
         git_groups, s3_indices = group_git_orders(job.orders, job)
 
         for (repo, commit_hash), order_entries in git_groups.items():
+            token_location = job.git_token_location or ""
             clone_dir = clone_repo(
                 repo=repo,
-                token_location=job.git_token_location,
+                token_location=token_location,
                 commit_hash=commit_hash,
                 ssh_key_location=job.git_ssh_key_location,
             )
@@ -104,7 +111,7 @@ def repackage_orders(
 
             for i, order in order_entries:
                 code_dir = extract_folder(clone_dir, order.git_folder)
-                results[i] = _process_order(
+                results[i] = _process_ssm_order(
                     job=job,
                     order=order,
                     order_index=i,
@@ -115,11 +122,11 @@ def repackage_orders(
                     internal_bucket=internal_bucket,
                 )
 
-        # Phase 2: Process S3-sourced orders (unchanged)
+        # Phase 2: Process S3-sourced orders
         for i in s3_indices:
             order = job.orders[i]
             code_dir = fetch_code_s3(order.s3_location)
-            results[i] = _process_order(
+            results[i] = _process_ssm_order(
                 job=job,
                 order=order,
                 order_index=i,
@@ -129,8 +136,24 @@ def repackage_orders(
                 flow_id=flow_id,
                 internal_bucket=internal_bucket,
             )
+
+        # Phase 3: SSM orders with no code source (commands-only)
+        for i, order in enumerate(job.orders):
+            if results[i] is not None:
+                continue
+            code_dir = tempfile.mkdtemp(prefix="iac-ci-ssm-")
+            results[i] = _process_ssm_order(
+                job=job,
+                order=order,
+                order_index=i,
+                code_dir=code_dir,
+                run_id=run_id,
+                trace_id=trace_id,
+                flow_id=flow_id,
+                internal_bucket=internal_bucket,
+            )
+
     finally:
-        # Clean up shared clone directories
         for clone_dir in shared_clone_dirs:
             shutil.rmtree(clone_dir, ignore_errors=True)
 

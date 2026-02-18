@@ -2,24 +2,26 @@
 
 ## Project Overview
 
-iac-ci is a generic, event-driven continuous delivery system for infrastructure-as-code and arbitrary command execution. It is AWS-native (Lambda, DynamoDB, S3, CodeBuild, Step Functions, API Gateway, ECR) and uses a single Docker image with multiple entrypoints for all Lambda functions and CodeBuild workers.
+iac-ci is a generic, event-driven continuous delivery system for infrastructure-as-code and arbitrary command execution. It is AWS-native (Lambda, DynamoDB, S3, CodeBuild, SSM, Step Functions, API Gateway, ECR) and uses a single Docker image with multiple entrypoints for all Lambda functions and CodeBuild workers.
 
-The system processes jobs containing multiple orders, queues them in DynamoDB, and executes them via Lambda or CodeBuild with full dependency resolution, cross-account credential management via SOPS, and PR comment tracking via VCS webhooks.
+The system processes jobs containing multiple orders, queues them in DynamoDB, and executes them via Lambda, CodeBuild, or SSM Run Command with full dependency resolution, cross-account credential management via SOPS, and PR comment tracking via VCS webhooks.
 
 ## Architecture
 
-Two main flows:
+Three execution paths, two entry points:
 
-- **Part 1 (init_job):** `init_job` Lambda receives job parameters, validates orders, repackages with SOPS-encrypted credentials, uploads to S3, inserts into DynamoDB, posts initial PR comment, and triggers the orchestrator via S3 event.
-- **Part 2 (execute_orders):** `orchestrator` Lambda is triggered by S3 events (callbacks), acquires a per-run_id lock, evaluates dependency graphs, dispatches ready orders in parallel to Lambda or CodeBuild, and finalizes when all orders complete. Workers callback via presigned S3 PUT URLs. A Step Function watchdog per order handles timeout safety.
+- **Part 1a (init_job):** `init_job` Lambda receives job parameters, validates orders, repackages with SOPS-encrypted credentials, uploads to S3, inserts into DynamoDB, posts initial PR comment, and triggers the orchestrator via S3 event. Handles Lambda and CodeBuild orders.
+- **Part 1b (ssm_config):** `ssm_config` Lambda is a separate entry point for SSM orders. Packages code (no SOPS), fetches credentials, uploads to S3, inserts into the shared DynamoDB orders table, and triggers the orchestrator. Handles SSM Run Command orders.
+- **Part 2 (execute_orders):** `orchestrator` Lambda is triggered by S3 events (callbacks), acquires a per-run_id lock, evaluates dependency graphs, dispatches ready orders in parallel to Lambda, CodeBuild, or SSM, and finalizes when all orders complete. Workers callback via presigned S3 PUT URLs. A Step Function watchdog per order handles timeout safety.
 
 ## Repo Structure
 
 ```
 iac-ci/
 ├── src/
-│   ├── common/          # shared libraries (dynamodb, s3, sops, vcs, trace, flow, models)
-│   ├── init_job/        # Part 1: init_job Lambda
+│   ├── common/          # shared libraries (dynamodb, s3, sops, vcs, trace, flow, models, code_source)
+│   ├── init_job/        # Part 1a: init_job Lambda (Lambda/CodeBuild orders)
+│   ├── ssm_config/      # Part 1b: ssm_config Lambda (SSM orders)
 │   ├── orchestrator/    # Part 2: execute_orders Lambda
 │   ├── watchdog_check/  # Step Function timeout watchdog Lambda
 │   └── worker/          # dual-purpose: Lambda handler + CodeBuild entrypoint
@@ -40,6 +42,8 @@ iac-ci/
 ## Key Technical Decisions
 
 - **Single Docker image:** Based on `public.ecr.aws/lambda/python:3.14`. All Lambda functions use the same image with different `image_config.command` overrides. CodeBuild uses the default CMD (`entrypoint.sh`).
+- **Three execution targets:** Orders specify `execution_target` ("lambda", "codebuild", or "ssm"). Lambda for short tasks (<15 min), CodeBuild for long-running containerized tasks, SSM Run Command for executing on existing EC2 instances.
+- **SSM config provider:** Separate entry point (`POST /ssm`) for server configuration. Packages code (e.g. Ansible playbooks, shell scripts), uploads to S3, and dispatches via SSM SendCommand to EC2 instances. Tool-agnostic — the SSM document is a general command runner.
 - **Cross-account execution:** No IAM role assumption at worker level. Target account credentials are fetched from SSM/Secrets Manager during repackage, encrypted into SOPS bundle, and unpacked as env vars at execution time.
 - **Worker callbacks:** Presigned S3 PUT URLs baked into SOPS bundle. Workers write `result.json` with status + logs. No DynamoDB write permissions needed on worker.
 - **Orchestrator is event-driven:** Triggered by S3 `ObjectCreated` events on `tmp/callbacks/runs/` prefix. No polling, no chained Lambda loops.

@@ -15,6 +15,7 @@ from src.common.models import (
     FAILED,
     TIMED_OUT,
     JOB_ORDER_NAME,
+    EXECUTION_TARGETS,
 )
 
 
@@ -29,15 +30,19 @@ class TestStatusConstants:
     def test_job_order_name(self):
         assert JOB_ORDER_NAME == "_job"
 
+    def test_execution_targets(self):
+        assert EXECUTION_TARGETS == frozenset({"lambda", "codebuild", "ssm"})
+
 
 class TestOrder:
     def test_create_minimal(self):
         order = Order(cmds=["echo hello"], timeout=300)
         assert order.cmds == ["echo hello"]
         assert order.timeout == 300
-        assert order.use_lambda is False
+        assert order.execution_target == "codebuild"
         assert order.must_succeed is True
         assert order.dependencies is None
+        assert order.ssm_targets is None
 
     def test_create_full(self):
         order = Order(
@@ -49,14 +54,16 @@ class TestOrder:
             env_vars={"KEY": "VALUE"},
             ssm_paths=["/path/1"],
             secret_manager_paths=["secret/1"],
-            use_lambda=True,
+            execution_target="lambda",
             queue_id="vpc-plan",
             dependencies=["dep-1"],
             must_succeed=False,
+            ssm_targets={"instance_ids": ["i-abc123"]},
         )
         assert order.order_name == "deploy-vpc"
-        assert order.use_lambda is True
+        assert order.execution_target == "lambda"
         assert order.must_succeed is False
+        assert order.ssm_targets == {"instance_ids": ["i-abc123"]}
 
     def test_to_dict(self):
         order = Order(cmds=["echo hi"], timeout=300)
@@ -72,14 +79,14 @@ class TestOrder:
             "cmds": ["echo test"],
             "timeout": 120,
             "order_name": "test-order",
-            "use_lambda": True,
+            "execution_target": "lambda",
             "unknown_field": "ignored",
         }
         order = Order.from_dict(data)
         assert order.cmds == ["echo test"]
         assert order.timeout == 120
         assert order.order_name == "test-order"
-        assert order.use_lambda is True
+        assert order.execution_target == "lambda"
 
     def test_commit_hash_field(self):
         order = Order(cmds=["echo"], timeout=300, commit_hash="abc123")
@@ -108,6 +115,70 @@ class TestOrder:
         assert restored.timeout == order.timeout
         assert restored.order_name == order.order_name
         assert restored.env_vars == order.env_vars
+
+    def test_from_dict_backward_compat_use_lambda_true(self):
+        data = {
+            "cmds": ["echo test"],
+            "timeout": 120,
+            "use_lambda": True,
+        }
+        order = Order.from_dict(data)
+        assert order.execution_target == "lambda"
+
+    def test_from_dict_backward_compat_use_lambda_false(self):
+        data = {
+            "cmds": ["echo test"],
+            "timeout": 120,
+            "use_lambda": False,
+        }
+        order = Order.from_dict(data)
+        assert order.execution_target == "codebuild"
+
+    def test_from_dict_execution_target_takes_precedence_over_use_lambda(self):
+        data = {
+            "cmds": ["echo test"],
+            "timeout": 120,
+            "execution_target": "ssm",
+            "use_lambda": True,
+        }
+        order = Order.from_dict(data)
+        assert order.execution_target == "ssm"
+
+    def test_execution_target_ssm(self):
+        order = Order(cmds=["echo"], timeout=300, execution_target="ssm")
+        assert order.execution_target == "ssm"
+
+    def test_ssm_targets_field(self):
+        targets = {"instance_ids": ["i-abc123", "i-def456"]}
+        order = Order(cmds=["echo"], timeout=300, ssm_targets=targets)
+        assert order.ssm_targets == targets
+
+    def test_ssm_targets_with_tags(self):
+        targets = {"tags": {"Environment": "prod", "Role": "web"}}
+        order = Order(cmds=["echo"], timeout=300, ssm_targets=targets)
+        assert order.ssm_targets["tags"]["Environment"] == "prod"
+
+    def test_ssm_targets_in_to_dict(self):
+        targets = {"instance_ids": ["i-abc123"]}
+        order = Order(cmds=["echo"], timeout=300, ssm_targets=targets)
+        d = order.to_dict()
+        assert d["ssm_targets"] == targets
+
+    def test_ssm_targets_excluded_when_none(self):
+        order = Order(cmds=["echo"], timeout=300)
+        d = order.to_dict()
+        assert "ssm_targets" not in d
+
+    def test_from_dict_with_ssm_targets(self):
+        data = {
+            "cmds": ["echo"],
+            "timeout": 300,
+            "execution_target": "ssm",
+            "ssm_targets": {"instance_ids": ["i-abc123"]},
+        }
+        order = Order.from_dict(data)
+        assert order.execution_target == "ssm"
+        assert order.ssm_targets == {"instance_ids": ["i-abc123"]}
 
 
 class TestJob:
@@ -325,3 +396,115 @@ class TestOrderRecord:
         }
         record = OrderRecord.from_dict(data)
         assert record.status == RUNNING
+
+    def test_execution_target_default(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+        )
+        assert record.execution_target == "codebuild"
+
+    def test_execution_target_lambda(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+            execution_target="lambda",
+        )
+        assert record.execution_target == "lambda"
+
+    def test_execution_target_ssm(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+            execution_target="ssm",
+        )
+        assert record.execution_target == "ssm"
+
+    def test_from_dict_backward_compat_use_lambda_true(self):
+        data = {
+            "run_id": "run-1",
+            "order_num": "001",
+            "trace_id": "abc",
+            "flow_id": "user:abc-exec",
+            "order_name": "deploy",
+            "cmds": ["cmd1"],
+            "use_lambda": True,
+        }
+        record = OrderRecord.from_dict(data)
+        assert record.execution_target == "lambda"
+
+    def test_from_dict_backward_compat_use_lambda_false(self):
+        data = {
+            "run_id": "run-1",
+            "order_num": "001",
+            "trace_id": "abc",
+            "flow_id": "user:abc-exec",
+            "order_name": "deploy",
+            "cmds": ["cmd1"],
+            "use_lambda": False,
+        }
+        record = OrderRecord.from_dict(data)
+        assert record.execution_target == "codebuild"
+
+    def test_from_dict_execution_target_takes_precedence(self):
+        data = {
+            "run_id": "run-1",
+            "order_num": "001",
+            "trace_id": "abc",
+            "flow_id": "user:abc-exec",
+            "order_name": "deploy",
+            "cmds": ["cmd1"],
+            "execution_target": "ssm",
+            "use_lambda": True,
+        }
+        record = OrderRecord.from_dict(data)
+        assert record.execution_target == "ssm"
+
+    def test_ssm_targets_field(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+            ssm_targets={"instance_ids": ["i-abc123"]},
+        )
+        assert record.ssm_targets == {"instance_ids": ["i-abc123"]}
+
+    def test_ssm_targets_in_to_dict(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+            ssm_targets={"instance_ids": ["i-abc123"]},
+        )
+        d = record.to_dict()
+        assert d["ssm_targets"] == {"instance_ids": ["i-abc123"]}
+
+    def test_ssm_targets_excluded_when_none(self):
+        record = OrderRecord(
+            run_id="run-1",
+            order_num="001",
+            trace_id="abc",
+            flow_id="user:abc-exec",
+            order_name="deploy",
+            cmds=["cmd1"],
+        )
+        d = record.to_dict()
+        assert "ssm_targets" not in d

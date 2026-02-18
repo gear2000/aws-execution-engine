@@ -1,15 +1,15 @@
 # iac-ci
 
-Event-driven execution engine for infrastructure-as-code, built on AWS Lambda, CodeBuild, DynamoDB, S3, Step Functions, and API Gateway.
+Event-driven execution engine for infrastructure-as-code, built on AWS Lambda, CodeBuild, SSM Run Command, DynamoDB, S3, Step Functions, and API Gateway.
 
 ## Overview
 
-iac-ci receives jobs containing orders (shell commands) via a webhook, queues them in DynamoDB, and executes them through Lambda or CodeBuild with full dependency resolution. It handles cross-account AWS credentials via SOPS encryption and tracks progress through VCS PR comments.
+iac-ci receives jobs containing orders (shell commands) via a webhook, queues them in DynamoDB, and executes them through Lambda, CodeBuild, or SSM Run Command with full dependency resolution. It handles cross-account AWS credentials via SOPS encryption (Lambda/CodeBuild) or SSM command parameters (SSM) and tracks progress through VCS PR comments.
 
 The system works in two phases:
 
-1. **Webhook intake** -- validates orders, packages credentials with SOPS, uploads execution bundles to S3, inserts state into DynamoDB, and posts an initial PR comment.
-2. **Orchestrator execution** -- triggered by S3 callback events, resolves dependency graphs, dispatches ready orders in parallel to Lambda or CodeBuild, and finalizes when all orders complete.
+1. **Webhook intake** -- validates orders, packages credentials with SOPS (or plain env vars for SSM), uploads execution bundles to S3, inserts state into DynamoDB, and posts an initial PR comment. Two entry points: `POST /webhook` for Lambda/CodeBuild orders, `POST /ssm` for SSM Run Command orders.
+2. **Orchestrator execution** -- triggered by S3 callback events, resolves dependency graphs, dispatches ready orders in parallel to Lambda, CodeBuild, or SSM Run Command, and finalizes when all orders complete.
 
 Everything is serverless. Nothing runs 24/7. All working data auto-cleans via TTL and lifecycle rules.
 
@@ -23,10 +23,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design.
 | S3 bucket (internal) | `iac-ci-internal-<hash>` | Exec bundles + callbacks, 1-day lifecycle |
 | S3 bucket (done) | `iac-ci-done-<hash>` | Completion markers, 1-day lifecycle |
 | ECR repository | `iac-ci` | Single Docker image for all functions |
-| Lambda functions (x4) | `iac-ci-init-job`, `iac-ci-orchestrator`, `iac-ci-watchdog-check`, `iac-ci-worker` | Same image, different entrypoints |
-| API Gateway (HTTP) | `iac-ci` | POST /webhook |
+| Lambda functions (x5) | `iac-ci-init-job`, `iac-ci-orchestrator`, `iac-ci-watchdog-check`, `iac-ci-worker`, `iac-ci-ssm-config` | Same image, different entrypoints |
+| API Gateway (HTTP) | `iac-ci` | POST /webhook, POST /ssm |
 | DynamoDB tables (x3) | `iac-ci-orders`, `iac-ci-order-events`, `iac-ci-locks` | PAY_PER_REQUEST billing |
 | CodeBuild project | `iac-ci-worker` | For long-running orders |
+| SSM Document | `iac-ci-run-commands` | For SSM Run Command orders |
 | Step Function | `iac-ci-watchdog` | Per-order timeout safety |
 | IAM roles | `iac-ci-*` | Least-privilege per function |
 

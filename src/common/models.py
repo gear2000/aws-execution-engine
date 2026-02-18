@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Status constants
 QUEUED = "queued"
@@ -16,6 +16,9 @@ TIMED_OUT = "timed_out"
 
 # Reserved order name for job-level events
 JOB_ORDER_NAME = "_job"
+
+# Valid execution targets
+EXECUTION_TARGETS = frozenset({"lambda", "codebuild", "ssm"})
 
 
 @dataclass
@@ -33,11 +36,12 @@ class Order:
     ssm_paths: Optional[List[str]] = None
     secret_manager_paths: Optional[List[str]] = None
     sops_key: Optional[str] = None
-    use_lambda: bool = False
+    execution_target: str = "codebuild"
     queue_id: Optional[str] = None
     dependencies: Optional[List[str]] = None
     must_succeed: bool = True
     callback_url: Optional[str] = None
+    ssm_targets: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -46,6 +50,10 @@ class Order:
     def from_dict(cls, data: dict) -> "Order":
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
+        # Backward compat: translate legacy use_lambda to execution_target
+        if "use_lambda" in data and "execution_target" not in data:
+            filtered["execution_target"] = "lambda" if data["use_lambda"] else "codebuild"
+        filtered.pop("use_lambda", None)
         return cls(**filtered)
 
 
@@ -152,7 +160,7 @@ class OrderRecord:
     queue_id: Optional[str] = None
     s3_location: Optional[str] = None
     callback_url: Optional[str] = None
-    use_lambda: bool = False
+    execution_target: str = "codebuild"
     git_b64: Optional[str] = None
     dependencies: Optional[List[str]] = None
     must_succeed: bool = True
@@ -162,6 +170,9 @@ class OrderRecord:
     execution_url: Optional[str] = None
     step_function_url: Optional[str] = None
     ttl: Optional[int] = None
+    ssm_targets: Optional[Dict[str, Any]] = None
+    ssm_document_name: Optional[str] = None
+    env_dict: Optional[Dict[str, str]] = None
 
     @property
     def pk(self) -> str:
@@ -176,4 +187,8 @@ class OrderRecord:
     def from_dict(cls, data: dict) -> "OrderRecord":
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
+        # Backward compat: translate legacy use_lambda to execution_target
+        if "use_lambda" in data and "execution_target" not in data:
+            filtered["execution_target"] = "lambda" if data["use_lambda"] else "codebuild"
+        filtered.pop("use_lambda", None)
         return cls(**filtered)

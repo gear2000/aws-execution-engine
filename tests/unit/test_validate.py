@@ -82,3 +82,25 @@ class TestValidateOrders:
         job = _make_job(orders=[_make_order(order_name="deploy-vpc", cmds=[])])
         errors = validate_orders(job)
         assert "deploy-vpc" in errors[0]
+
+    def test_invalid_execution_target_fails(self):
+        job = _make_job(orders=[_make_order(execution_target="kubernetes")])
+        errors = validate_orders(job)
+        assert len(errors) == 1
+        assert "execution_target" in errors[0].lower()
+        assert "kubernetes" in errors[0]
+
+    def test_valid_execution_target_lambda(self):
+        job = _make_job(orders=[_make_order(execution_target="lambda")])
+        errors = validate_orders(job)
+        assert errors == []
+
+    def test_valid_execution_target_codebuild(self):
+        job = _make_job(orders=[_make_order(execution_target="codebuild")])
+        errors = validate_orders(job)
+        assert errors == []
+
+    def test_valid_execution_target_ssm(self):
+        job = _make_job(orders=[_make_order(execution_target="ssm")])
+        errors = validate_orders(job)
+        assert errors == []
