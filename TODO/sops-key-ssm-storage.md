@@ -80,23 +80,49 @@ Store the SOPS private key in SSM Parameter Store as SecureString during init_jo
 
 ## Data Flow
 
-```
-init_job:
-  1. _generate_age_key() -> (public_key, key_file, private_key_content)
-  2. encrypt_env(env_vars) -> (encrypted_file, public_key, private_key_content)
-  3. store_sops_key_ssm(run_id, order_num, private_key_content) -> SSM path
-  4. SSM path saved in DynamoDB order record
+```mermaid
+flowchart TB
+    subgraph InitJob["init_job"]
+        S1["1. _generate_age_key()<br><i>→ public_key, key_file, private_key_content</i>"]
+        S2["2. encrypt_env(env_vars)<br><i>→ encrypted_file, public_key, private_key_content</i>"]
+        S3["3. store_sops_key_ssm()<br><i>run_id, order_num → SSM path</i>"]
+        S4["4. SSM path saved<br><i>in DynamoDB order record</i>"]
+    end
 
-orchestrator/dispatch:
-  5. Read order from DynamoDB (includes sops_key_ssm_path)
-  6. Pass sops_key_ssm_path in Lambda payload / CodeBuild env var
+    subgraph Dispatch["orchestrator/dispatch"]
+        S5["5. Read order from DynamoDB<br><i>includes sops_key_ssm_path</i>"]
+        S6["6. Pass sops_key_ssm_path<br><i>Lambda payload / CodeBuild env var</i>"]
+    end
 
-worker:
-  7. Receive sops_key_ssm_path
-  8. fetch_sops_key_ssm(ssm_path) -> private_key_content
-  9. sops.decrypt_env(encrypted_file, private_key_content) -> env vars
-  10. Execute commands with decrypted env vars
+    subgraph WorkerPhase["worker"]
+        S7["7. Receive sops_key_ssm_path"]
+        S8["8. fetch_sops_key_ssm()<br><i>→ private_key_content</i>"]
+        S9["9. sops.decrypt_env()<br><i>→ env vars</i>"]
+        S10["10. Execute commands<br><i>with decrypted env vars</i>"]
+    end
 
-finalize:
-  11. delete_sops_keys_ssm(run_id, order_nums) -> cleanup
+    subgraph Finalize["finalize"]
+        S11["11. delete_sops_keys_ssm()<br><i>run_id, order_nums → cleanup</i>"]
+    end
+
+    S1 --> S2 --> S3 --> S4
+    S4 --> S5 --> S6
+    S6 --> S7 --> S8 --> S9 --> S10
+    S10 --> S11
+
+    style S1 fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style S2 fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style S3 fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style S4 fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style S5 fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style S6 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style S7 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style S8 fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style S9 fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style S10 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style S11 fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
+    style InitJob fill:#1a1a2e,stroke:#f97316,color:#e2e8f0
+    style Dispatch fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
+    style WorkerPhase fill:#1a1a2e,stroke:#a855f7,color:#e2e8f0
+    style Finalize fill:#1a1a2e,stroke:#ef4444,color:#e2e8f0
 ```
