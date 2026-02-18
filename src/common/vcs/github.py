@@ -1,7 +1,5 @@
 """GitHub VCS provider implementation."""
 
-import hashlib
-import hmac
 from typing import List, Optional
 
 import requests
@@ -22,16 +20,6 @@ class GitHubProvider(VcsProvider):
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
         }
-
-    def verify_webhook(self, headers: dict, body: bytes, secret: str) -> bool:
-        """Verify GitHub webhook HMAC-SHA256 signature."""
-        signature = headers.get("X-Hub-Signature-256", "")
-        if not signature.startswith("sha256="):
-            return False
-        expected = hmac.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(signature[7:], expected)
 
     def get_comments(
         self, repo: str, pr_number: int, token: str,

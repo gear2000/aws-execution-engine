@@ -1,11 +1,11 @@
 output "api_gateway_url" {
   description = "API Gateway endpoint URL"
-  value       = aws_apigatewayv2_api.webhook.api_endpoint
+  value       = aws_apigatewayv2_api.api.api_endpoint
 }
 
 output "api_gateway_id" {
   description = "API Gateway ID"
-  value       = aws_apigatewayv2_api.webhook.id
+  value       = aws_apigatewayv2_api.api.id
 }
 
 output "lambda_function_names" {

@@ -4,11 +4,11 @@ Event-driven execution engine for infrastructure-as-code, built on AWS Lambda, C
 
 ## Overview
 
-iac-ci receives jobs containing orders (shell commands) via a webhook, queues them in DynamoDB, and executes them through Lambda, CodeBuild, or SSM Run Command with full dependency resolution. It handles cross-account AWS credentials via SOPS encryption (Lambda/CodeBuild) or SSM command parameters (SSM) and tracks progress through VCS PR comments.
+iac-ci receives jobs containing orders (shell commands) via API, queues them in DynamoDB, and executes them through Lambda, CodeBuild, or SSM Run Command with full dependency resolution. It handles cross-account AWS credentials via SOPS encryption (Lambda/CodeBuild) or SSM command parameters (SSM) and tracks progress through VCS PR comments.
 
 The system works in two phases:
 
-1. **Webhook intake** -- validates orders, packages credentials with SOPS (or plain env vars for SSM), uploads execution bundles to S3, inserts state into DynamoDB, and posts an initial PR comment. Two entry points: `POST /webhook` for Lambda/CodeBuild orders, `POST /ssm` for SSM Run Command orders.
+1. **Job intake** -- validates orders, packages credentials with SOPS (or plain env vars for SSM), uploads execution bundles to S3, inserts state into DynamoDB, and posts an initial PR comment. Two entry points: `POST /init` for Lambda/CodeBuild orders, `POST /ssm` for SSM Run Command orders.
 2. **Orchestrator execution** -- triggered by S3 callback events, resolves dependency graphs, dispatches ready orders in parallel to Lambda, CodeBuild, or SSM Run Command, and finalizes when all orders complete.
 
 Everything is serverless. Nothing runs 24/7. All working data auto-cleans via TTL and lifecycle rules.
@@ -24,7 +24,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design.
 | S3 bucket (done) | `iac-ci-done-<hash>` | Completion markers, 1-day lifecycle |
 | ECR repository | `iac-ci` | Single Docker image for all functions |
 | Lambda functions (x5) | `iac-ci-init-job`, `iac-ci-orchestrator`, `iac-ci-watchdog-check`, `iac-ci-worker`, `iac-ci-ssm-config` | Same image, different entrypoints |
-| API Gateway (HTTP) | `iac-ci` | POST /webhook, POST /ssm |
+| API Gateway (HTTP) | `iac-ci-api` | POST /init, POST /ssm |
 | DynamoDB tables (x3) | `iac-ci-orders`, `iac-ci-order-events`, `iac-ci-locks` | PAY_PER_REQUEST billing |
 | CodeBuild project | `iac-ci-worker` | For long-running orders |
 | SSM Document | `iac-ci-run-commands` | For SSM Run Command orders |
@@ -130,7 +130,7 @@ cd ../..
 export API_GATEWAY_URL=$(cd infra/02-deploy && terraform output -raw api_gateway_url)
 
 # Quick check -- API Gateway should return 4xx with no payload
-curl -s -o /dev/null -w "%{http_code}" -X POST "$API_GATEWAY_URL/webhook"
+curl -s -o /dev/null -w "%{http_code}" -X POST "$API_GATEWAY_URL/init"
 ```
 
 To run the full smoke test suite:
@@ -174,10 +174,10 @@ unzip iac-ci-teardown-*.zip
 
 ## Usage
 
-Once deployed, send jobs to the webhook:
+Once deployed, send jobs to the API:
 
 ```bash
-curl -X POST "$API_GATEWAY_URL/webhook" \
+curl -X POST "$API_GATEWAY_URL/init" \
   -H "Content-Type: application/json" \
   -d '{"job_parameters_b64": "<base64-encoded job payload>"}'
 ```

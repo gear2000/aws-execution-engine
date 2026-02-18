@@ -1,6 +1,6 @@
 # Variables Reference
 
-Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `init_job` Lambda (via `POST /webhook`) or the `ssm_config` Lambda (via `POST /ssm`).
+Complete reference for `job_parameters_b64` — the base64-encoded payload sent to the `init_job` Lambda (via `POST /init`) or the `ssm_config` Lambda (via `POST /ssm`).
 
 ---
 
@@ -87,7 +87,7 @@ Complete reference for `job_parameters_b64` — the base64-encoded payload sent 
 }
 ```
 
-This payload is base64-encoded before being sent to the `init_job` Lambda via `POST /webhook`.
+This payload is base64-encoded before being sent to the `init_job` Lambda via `POST /init`.
 
 ---
 

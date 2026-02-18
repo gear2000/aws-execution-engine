@@ -4,7 +4,7 @@
 
 iac-ci is a generic, event-driven continuous delivery system for infrastructure-as-code and arbitrary command execution. It is AWS-native (Lambda, DynamoDB, S3, CodeBuild, SSM, Step Functions, API Gateway, ECR) and uses a single Docker image with multiple entrypoints for all Lambda functions and CodeBuild workers.
 
-The system processes jobs containing multiple orders, queues them in DynamoDB, and executes them via Lambda, CodeBuild, or SSM Run Command with full dependency resolution, cross-account credential management via SOPS, and PR comment tracking via VCS webhooks.
+The system processes jobs containing multiple orders, queues them in DynamoDB, and executes them via Lambda, CodeBuild, or SSM Run Command with full dependency resolution, cross-account credential management via SOPS, and PR comment tracking via VCS.
 
 ## Architecture
 

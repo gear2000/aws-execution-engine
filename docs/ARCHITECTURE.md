@@ -12,7 +12,7 @@ The system is split into three flows:
 
 ---
 
-## Part 1: init_job (ProcessWebhook Lambda)
+## Part 1: init_job Lambda
 
 ### Upstream
 
@@ -31,8 +31,8 @@ flowchart TB
 
     Note["cmds[] already resolved"]
 
-    APIGW["API Gateway<br><i>GitHub webhook signature verification</i>"]
-    IJ["init_job Lambda<br><i>POST /webhook</i>"]
+    APIGW["API Gateway<br><i>SigV4 + JWT authentication</i>"]
+    IJ["init_job Lambda<br><i>POST /init</i>"]
     SSMCfg["ssm_config Lambda<br><i>POST /ssm</i>"]
 
     SNS --> Note
