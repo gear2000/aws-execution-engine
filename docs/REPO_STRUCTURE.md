@@ -139,26 +139,34 @@ All Lambda functions use the same ECR image with different `image_config.command
 
 CodeBuild uses the same image with the default `CMD` which runs `entrypoint.sh`.
 
-```
-┌──────────────────────────┐
-│ entrypoint.sh            │
-│  → python -m             │
-│    src.worker.run        │
-├──────────────────────────┤
-│ handler.py               │
-│  def handler():          │
-│    → src.worker.run()    │
-└──────────────────────────┘
-       │
-       ▼
-┌──────────────────────────┐
-│ run.py                   │
-│ 1. fetch exec.zip        │
-│ 2. unpack SOPS           │
-│ 3. run cmds              │
-│ 4. capture logs + status │
-│ 5. callback result.json  │
-└──────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Entrypoints["Dual Entrypoints"]
+        CB["entrypoint.sh<br><i>CodeBuild CMD</i><br><i>→ python -m src.worker.run</i>"]
+        Lambda["handler.py<br><i>Lambda entrypoint</i><br><i>def handler(): → src.worker.run()</i>"]
+    end
+
+    subgraph RunPy["run.py — Shared Worker Logic"]
+        S1["1. Fetch exec.zip"]
+        S2["2. Unpack SOPS"]
+        S3["3. Run cmds"]
+        S4["4. Capture logs + status"]
+        S5["5. Callback result.json"]
+    end
+
+    CB --> S1
+    Lambda --> S1
+    S1 --> S2 --> S3 --> S4 --> S5
+
+    style CB fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style Lambda fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style S1 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style S2 fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style S3 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style S4 fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style S5 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Entrypoints fill:#1a1a2e,stroke:#a855f7,color:#e2e8f0
+    style RunPy fill:#1a1a2e,stroke:#f97316,color:#e2e8f0
 ```
 
 ---

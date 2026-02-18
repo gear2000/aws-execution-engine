@@ -20,121 +20,160 @@ Commands are resolved before entering this system. For example, an IAC layer tra
 
 ### Trigger Sources
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     TRIGGER SOURCES                         │
-│   SNS  │  Direct Invoke  │  Step Function  │  Lambda URL    │
-└────────────────────────┬────────────────────────────────────┘
-                         │ cmds[] already resolved
-                         ▼
-                  API Gateway (default)
-                  POST /webhook   → init_job Lambda
-                  POST /ssm       → ssm_config Lambda
-                  GitHub webhook signature verification
+```mermaid
+flowchart TB
+    subgraph Triggers["Trigger Sources"]
+        SNS["SNS"]
+        DI["Direct Invoke"]
+        SF["Step Function"]
+        LU["Lambda URL"]
+    end
+
+    Note["cmds[] already resolved"]
+
+    APIGW["API Gateway<br><i>GitHub webhook signature verification</i>"]
+    IJ["init_job Lambda<br><i>POST /webhook</i>"]
+    SSMCfg["ssm_config Lambda<br><i>POST /ssm</i>"]
+
+    SNS --> Note
+    DI --> Note
+    SF --> Note
+    LU --> Note
+    Note --> APIGW
+    APIGW --> IJ
+    APIGW --> SSMCfg
+
+    style SNS fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style DI fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style SF fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style LU fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style Note fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style APIGW fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style IJ fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style SSMCfg fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Triggers fill:#1a1a2e,stroke:#a855f7,color:#e2e8f0
 ```
 
 ### Flow
 
-```
-process_job_and_insert_orders()
+```mermaid
+flowchart LR
+    Input["process_job_and_insert_orders()<br><i>job_parameters_b64</i><br><i>trace_id · run_id · done_endpt</i><br><i>(all auto-gen if missing)</i>"]
+    Trace["Trace Format<br><i>&lt;trace_id&gt;:&lt;epoch_time&gt;</i><br><i>new leg = same trace_id, new epoch</i>"]
 
-inputs:
-  - job_parameters_b64
-  - trace_id (auto-gen if missing)
-  - run_id (auto-gen if missing)
-  - done_endpt (auto-gen if missing)
+    Input --> Trace
 
-trace format: <trace_id>:<epoch_time>
-new leg = same trace_id, new epoch
+    style Input fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Trace fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 **Step 1: Generate Flow ID + Validate**
 
-```
-flow_id = <username>:<trace_id>-<flow_label>
+```mermaid
+flowchart TB
+    FlowID["Generate flow_id<br><i>&lt;username&gt;:&lt;trace_id&gt;-&lt;flow_label&gt;</i>"]
+    Validate["Validate each order<br><i>cmds[] exists · code source · timeout</i>"]
+    Check{"All valid?"}
+    OK["Continue to Step 2"]
+    Fail["Error out<br><i>fail fast</i>"]
 
-Validate each order:
-  - cmds[] exists and non-empty
-  - s3 location OR token + repo + folder
-  - timeout present
+    FlowID --> Validate --> Check
+    Check -- "Yes" --> OK
+    Check -- "No" --> Fail
 
-Any failure → error out (fail fast)
+    style FlowID fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Validate fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style OK fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Fail fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
 ```
 
 **Step 2: Repackage Each Order**
 
-```
-For each order:
-  - get code (s3 or git)
-  - fetch SSM/Secrets Manager values
-  - get target account temp credentials
-  - generate presigned S3 PUT URL for callback
-  - merge all with env_vars
-  - encrypt everything with SOPS (auto-gen age key if none provided)
-  - store SOPS private key in SSM Parameter Store as SecureString
-    path: /iac-ci/sops-keys/<run_id>/<order_num>
-  - write env_vars.env
-  - write secrets.src
-  - re-zip tarball
+```mermaid
+flowchart TB
+    Start["For each order"]
+    Code["Get code<br><i>S3 or Git</i>"]
+    Creds["Fetch credentials<br><i>SSM / Secrets Manager</i><br><i>+ target account temp creds</i>"]
+    Presign["Generate presigned S3 PUT URL<br><i>for worker callback</i>"]
+    Merge["Merge all with env_vars"]
+    SOPS["Encrypt with SOPS<br><i>auto-gen age key if none provided</i>"]
+    SSMStore["Store SOPS private key in SSM<br><i>/iac-ci/sops-keys/&lt;run_id&gt;/&lt;order_num&gt;</i><br><i>SecureString</i>"]
+    Write["Write env_vars.env + secrets.src<br>Re-zip tarball"]
+
+    Start --> Code --> Creds --> Presign --> Merge --> SOPS --> SSMStore --> Write
+
+    style Start fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Code fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Creds fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Presign fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Merge fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style SOPS fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style SSMStore fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Write fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 **Step 3: Upload to S3**
 
-```
-s3://<internal-bucket>/tmp/exec/<run_id>/<order_num>/exec.zip
+```mermaid
+flowchart LR
+    Upload["Upload exec.zip to S3<br><i>tmp/exec/&lt;run_id&gt;/&lt;order_num&gt;/exec.zip</i>"]
+    Optional["Optional: stripped copy<br><i>no SOPS secrets, if copy_secrets requested</i>"]
 
-Optional: stripped copy (no SOPS secrets) if copy_secrets requested
+    Upload --> Optional
+
+    style Upload fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Optional fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 **Step 4: Insert Orders to DynamoDB**
 
-```
-Orders table — Key: <run_id>:<order_num>
+```mermaid
+flowchart LR
+    Insert["Insert to DynamoDB<br><i>Orders table</i><br><i>Key: &lt;run_id&gt;:&lt;order_num&gt;</i>"]
+    Fields["Fields<br><i>trace_id · flow_id · order_name · cmds</i><br><i>s3_location · callback_url · execution_target</i><br><i>dependencies · status: queued · timeout</i>"]
 
-Fields:
-  trace_id, flow_id, order_name, cmds, queue_id,
-  s3_location, callback_url, execution_target,
-  git (repo, token_loc, ssh_key_loc, folder) as b64,
-  dependencies, status ("queued"), created_at, last_update,
-  timeout, must_succeed (default: true),
-  execution_url, step_function_url
+    Insert --> Fields
+
+    style Insert fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Fields fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 **Step 5: Init PR Comment**
 
-```
-Uses VcsPrHelper to post initial comment on PR.
+```mermaid
+flowchart LR
+    VCS["VcsPrHelper<br><i>Post initial PR comment</i>"]
+    Comment["PR Comment Body<br><i>#search_tag · #run_id · #flow_id</i><br><i>Order Summary:</i><br><i>order-1: queued · order-2: queued · ...</i>"]
 
-Comment body:
-  #search_tag
-  #run_id: <run_id>
-  #flow_id: <flow_id>
+    VCS --> Comment
 
-  Order Summary:
-  ├─ order-1: queued
-  ├─ order-2: queued
-  └─ order-3: queued
+    style VCS fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Comment fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 **Step 6: Kick Off Orchestrator**
 
-```
-Write init trigger:
-  s3://<internal-bucket>/tmp/callbacks/runs/<run_id>/0000/result.json
+```mermaid
+flowchart LR
+    Write["Write init trigger to S3<br><i>tmp/callbacks/runs/&lt;run_id&gt;/0000/result.json</i>"]
+    Event["S3 ObjectCreated event"]
+    Orch["Orchestrator Lambda<br><i>invoked</i>"]
 
-S3 event fires → orchestrator Lambda invoked
+    Write --> Event --> Orch
+
+    style Write fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Event fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Orch fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 **Response**
 
-```
-HTTP 200/400
-run_id
-trace_id
-flow_id
-done_endpt
-pr_search_tag
-init_pr_comment
+```mermaid
+flowchart LR
+    Resp["HTTP 200/400<br><i>run_id · trace_id · flow_id</i><br><i>done_endpt · pr_search_tag</i><br><i>init_pr_comment</i>"]
+
+    style Resp fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 ---
@@ -145,81 +184,99 @@ Separate construction point for SSM Run Command orders. Receives jobs via `POST 
 
 ### Flow
 
-```
-process_ssm_job()
+```mermaid
+flowchart LR
+    Input["process_ssm_job()<br><i>job_parameters_b64 (SsmJob payload)</i><br><i>trace_id · run_id · done_endpt</i><br><i>(all auto-gen if missing)</i>"]
 
-inputs:
-  - job_parameters_b64 (SsmJob payload)
-  - trace_id (auto-gen if missing)
-  - run_id (auto-gen if missing)
-  - done_endpt (auto-gen if missing)
+    style Input fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 **Step 1: Validate SSM Orders**
 
-```
-Validate each order:
-  - cmds[] exists and non-empty
-  - timeout present and positive
-  - ssm_targets is present
-  - ssm_targets contains 'instance_ids' or 'tags'
+```mermaid
+flowchart TB
+    Validate["Validate each SSM order<br><i>cmds[] · timeout · ssm_targets</i><br><i>(instance_ids or tags)</i>"]
+    Check{"All valid?"}
+    OK["Continue to Step 2"]
+    Fail["Error out<br><i>fail fast</i>"]
 
-Any failure → error out (fail fast)
+    Validate --> Check
+    Check -- "Yes" --> OK
+    Check -- "No" --> Fail
+
+    style Validate fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style OK fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Fail fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
 ```
 
 **Step 2: Repackage (No SOPS)**
 
-```
-For each order:
-  - get code (s3 or git) — same code_source logic as init_job
-  - fetch SSM/Secrets Manager values (plain, not SOPS-encrypted)
-  - generate presigned S3 PUT URL for callback
-  - merge all with env_vars into env_dict
-  - write cmds.json + env_vars.json into code dir
-  - zip into exec.zip
+```mermaid
+flowchart TB
+    Start["For each SSM order"]
+    Code["Get code<br><i>S3 or Git (same as init_job)</i>"]
+    Creds["Fetch credentials<br><i>SSM / Secrets Manager (plain, no SOPS)</i>"]
+    Presign["Generate presigned S3 PUT URL<br><i>for callback</i>"]
+    Merge["Merge all with env_vars into env_dict"]
+    Write["Write cmds.json + env_vars.json<br>Zip into exec.zip"]
+    Note["No SOPS encryption<br><i>credentials passed via SSM command parameters</i>"]
 
-No SOPS encryption — credentials passed via SSM command parameters.
+    Start --> Code --> Creds --> Presign --> Merge --> Write --> Note
+
+    style Start fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Code fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Creds fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Presign fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Merge fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Write fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Note fill:#2d1052,stroke:#a855f7,color:#e2e8f0
 ```
 
 **Step 3: Upload to S3**
 
-```
-s3://<internal-bucket>/tmp/exec/<run_id>/<order_num>/exec.zip
-(reuses init_job upload logic)
+```mermaid
+flowchart LR
+    Upload["Upload exec.zip to S3<br><i>tmp/exec/&lt;run_id&gt;/&lt;order_num&gt;/exec.zip</i><br><i>reuses init_job upload logic</i>"]
+
+    style Upload fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 **Step 4: Insert Orders to DynamoDB**
 
-```
-Orders table — Key: <run_id>:<order_num>
+```mermaid
+flowchart LR
+    Insert["Insert to DynamoDB<br><i>Orders table</i><br><i>Key: &lt;run_id&gt;:&lt;order_num&gt;</i>"]
+    Fields["SSM-specific fields<br><i>execution_target: ssm</i><br><i>ssm_targets · ssm_document_name</i><br><i>env_dict (plain, not SOPS)</i>"]
 
-Fields:
-  trace_id, flow_id, order_name, cmds, queue_id,
-  s3_location, callback_url, execution_target ("ssm"),
-  ssm_targets, ssm_document_name (optional),
-  env_dict (plain, not SOPS),
-  dependencies, status ("queued"), created_at, last_update,
-  timeout, must_succeed (default: true)
+    Insert --> Fields
+
+    style Insert fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Fields fill:#3d2b00,stroke:#eab308,color:#e2e8f0
 ```
 
 **Step 5: Kick Off Orchestrator**
 
-```
-Write init trigger:
-  s3://<internal-bucket>/tmp/callbacks/runs/<run_id>/0000/result.json
+```mermaid
+flowchart LR
+    Write["Write init trigger to S3<br><i>tmp/callbacks/runs/&lt;run_id&gt;/0000/result.json</i>"]
+    Event["S3 ObjectCreated event"]
+    Orch["Orchestrator Lambda<br><i>same mechanism as init_job</i>"]
 
-S3 event fires → orchestrator Lambda invoked
-(same mechanism as init_job)
+    Write --> Event --> Orch
+
+    style Write fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Event fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Orch fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 **Response**
 
-```
-HTTP 200/400
-run_id
-trace_id
-flow_id
-done_endpt
+```mermaid
+flowchart LR
+    Resp["HTTP 200/400<br><i>run_id · trace_id · flow_id · done_endpt</i>"]
+
+    style Resp fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 **Key differences from init_job:**
@@ -234,100 +291,167 @@ done_endpt
 
 ### Trigger Mechanism
 
-```
-S3 event notification:
-  prefix: tmp/callbacks/runs/
-  suffix: result.json
-  event:  s3:ObjectCreated:*
-  → orchestrator Lambda
+```mermaid
+flowchart TB
+    S3Event["S3 Event Notification<br><i>prefix: tmp/callbacks/runs/</i><br><i>suffix: result.json</i><br><i>event: s3:ObjectCreated:*</i>"]
+    Orch["Orchestrator Lambda<br><i>extracts run_id from path</i>"]
 
-All triggers use the same path pattern:
-  Init:     tmp/callbacks/runs/<run_id>/0000/result.json
-  Workers:  tmp/callbacks/runs/<run_id>/<order_num>/result.json
+    subgraph Paths["Trigger Path Patterns"]
+        Init["Init trigger<br><i>tmp/callbacks/runs/&lt;run_id&gt;/0000/result.json</i>"]
+        Worker["Worker callback<br><i>tmp/callbacks/runs/&lt;run_id&gt;/&lt;order_num&gt;/result.json</i>"]
+    end
 
-Orchestrator extracts run_id from path.
+    Init --> S3Event
+    Worker --> S3Event
+    S3Event --> Orch
+
+    style S3Event fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Orch fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Init fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Worker fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Paths fill:#1a1a2e,stroke:#06b6d4,color:#e2e8f0
 ```
 
 ### Flow
 
 **Lock Acquisition**
 
-```
-DynamoDB conditional put: lock:<run_id>
-  - Acquired → continue
-  - Exists   → EXIT (already handling this run_id)
+```mermaid
+flowchart LR
+    Lock["DynamoDB conditional put<br><i>lock:&lt;run_id&gt;</i>"]
+    Check{"Acquired?"}
+    Continue["Continue<br><i>proceed with orchestration</i>"]
+    Exit["EXIT<br><i>already handling this run_id</i>"]
+
+    Lock --> Check
+    Check -- "Yes" --> Continue
+    Check -- "No (exists)" --> Exit
+
+    style Lock fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Continue fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Exit fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
 ```
 
 **Step 1: Read State**
 
-```
-Query DynamoDB orders table: all orders for <run_id>:*
+```mermaid
+flowchart TB
+    Query["Query DynamoDB orders<br><i>all orders for &lt;run_id&gt;:*</i>"]
+    CheckS3["Check S3 for callbacks<br><i>tmp/callbacks/runs/&lt;run_id&gt;/&lt;order_num&gt;/result.json</i>"]
+    Parse["For each new result.json<br><i>parse status + log</i>"]
+    Update["Update orders table status<br>Write to order_events<br>Update PR comment"]
 
-Check S3 for completed order callbacks:
-  tmp/callbacks/runs/<run_id>/<order_num>/result.json
+    Query --> CheckS3 --> Parse --> Update
 
-For each new result.json:
-  - parse {"status", "log"}
-  - update orders table status
-  - write to order_events table
-  - update PR comment via VcsPrHelper
+    style Query fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style CheckS3 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Parse fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Update fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
 ```
 
 **Step 2: Evaluate Dependencies**
 
-```
-For each "queued" order:
-  - No deps              → ready
-  - All deps succeeded   → ready
-  - Any dep failed + must_succeed → fail this order
-  - Deps still running   → skip
+```mermaid
+flowchart TB
+    Queued["For each queued order"]
+    Check{"Check dependencies"}
+    NoDeps["No deps → ready"]
+    AllOK["All deps succeeded → ready"]
+    Failed["Any dep failed +<br>must_succeed → fail order"]
+    Running["Deps still running → skip"]
+
+    Queued --> Check
+    Check --> NoDeps
+    Check --> AllOK
+    Check --> Failed
+    Check --> Running
+
+    style Queued fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style NoDeps fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style AllOK fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Failed fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
+    style Running fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 **Step 3: Dispatch (parallel)**
 
-```
-For each ready order:
-  - execution_target="lambda"    → invoke worker Lambda
-  - execution_target="codebuild" → start CodeBuild project
-  - execution_target="ssm"       → send SSM Run Command
+```mermaid
+flowchart TB
+    Ready["For each ready order"]
+    Target{"execution_target?"}
+    Lambda["Invoke worker Lambda"]
+    CB["Start CodeBuild project"]
+    SSMCmd["Send SSM Run Command"]
+    Compat["Backward compat<br><i>use_lambda=true → lambda</i><br><i>use_lambda=false → codebuild</i>"]
+    Post["Start watchdog Step Function<br>Update status → running<br>Write order_event: dispatched<br>Update PR comment"]
 
-  Backward compat: if use_lambda is present but execution_target is not,
-    use_lambda=true  → lambda
-    use_lambda=false → codebuild
+    Ready --> Target
+    Target -- "lambda" --> Lambda --> Post
+    Target -- "codebuild" --> CB --> Post
+    Target -- "ssm" --> SSMCmd --> Post
+    Target -. "use_lambda fallback" .-> Compat
 
-  - Start watchdog Step Function for this order
-  - Update orders table: status → running
-  - Write order_event: dispatched
-  - Update PR comment
+    style Ready fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Target fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Lambda fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style CB fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style SSMCmd fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Compat fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Post fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 **Step 4: Check Completion**
 
-```
-All orders done (succeeded/failed/timed_out)?
-  NO  → release lock (next S3 callback will re-trigger)
-  YES → finalize
+```mermaid
+flowchart LR
+    Check{"All orders done?<br><i>succeeded / failed / timed_out</i>"}
+    No["Release lock<br><i>next S3 callback will re-trigger</i>"]
+    Yes["Finalize"]
+
+    Check -- "No" --> No
+    Check -- "Yes" --> Yes
+
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style No fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Yes fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 **Step 5: Finalize**
 
-```
-- Write job-level order_event (_job:epoch) with:
-    status: succeeded/failed/timed_out
-    done_endpt reference
-    summary: {succeeded: N, failed: N, timed_out: N}
-- Write done endpoint:
-    s3://<done-bucket>/<run_id>/done
-- Final PR comment update (full summary)
-- Release lock: status → "completed"
+```mermaid
+flowchart TB
+    Event["Write job-level order_event<br><i>_job:epoch</i><br><i>status · done_endpt · summary</i>"]
+    Done["Write done endpoint<br><i>s3://done-bucket/&lt;run_id&gt;/done</i>"]
+    PR["Final PR comment<br><i>full summary</i>"]
+    Lock["Release lock<br><i>status → completed</i>"]
+
+    Event --> Done --> PR --> Lock
+
+    style Event fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Done fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style PR fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Lock fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
 ```
 
 ### Job-Level Status Resolution
 
-```
-- All orders succeeded                    → job succeeded
-- Any must_succeed order failed           → job failed
-- Job-level timeout exceeded              → job timed_out
+```mermaid
+flowchart TB
+    Check{"Job-Level Status Resolution"}
+    Succeeded["All orders succeeded → job succeeded"]
+    Failed["Any must_succeed order failed → job failed"]
+    Timeout["Job-level timeout exceeded → job timed_out"]
+
+    Check --> Succeeded
+    Check --> Failed
+    Check --> Timeout
+
+    style Check fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Succeeded fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Failed fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
+    style Timeout fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 ---
@@ -336,19 +460,25 @@ All orders done (succeeded/failed/timed_out)?
 
 Same code runs in Lambda and CodeBuild Docker container.
 
-```
-1. Fetch exec.zip from S3
-2. Fetch SOPS private key from SSM Parameter Store
-   path: /iac-ci/sops-keys/<run_id>/<order_num>
-3. Decrypt SOPS → env vars:
-   - AWS creds (target account)
-   - custom env vars
-   - CALLBACK_URL (presigned S3 PUT)
-4. Run cmds (os.system / subprocess.Popen, no buffering)
-5. Capture exit code + stdout/stderr
-6. PUT to CALLBACK_URL:
-   {"status": "succeeded/failed/timed_out", "log": "<stdout+stderr>"}
-7. S3 event fires → orchestrator re-triggered
+```mermaid
+flowchart TB
+    Fetch["1. Fetch exec.zip from S3"]
+    SSM["2. Fetch SOPS private key from SSM<br><i>/iac-ci/sops-keys/&lt;run_id&gt;/&lt;order_num&gt;</i>"]
+    Decrypt["3. Decrypt SOPS → env vars<br><i>AWS creds · custom env vars · CALLBACK_URL</i>"]
+    Run["4. Run cmds<br><i>os.system / subprocess.Popen, no buffering</i>"]
+    Capture["5. Capture exit code + stdout/stderr"]
+    Callback["6. PUT result.json to CALLBACK_URL<br><i>status: succeeded/failed/timed_out + log</i>"]
+    S3Event["7. S3 event fires<br><i>→ orchestrator re-triggered</i>"]
+
+    Fetch --> SSM --> Decrypt --> Run --> Capture --> Callback --> S3Event
+
+    style Fetch fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style SSM fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Decrypt fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style Run fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Capture fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Callback fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style S3Event fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 No IAM role switching. Worker only operates with target account credentials from SOPS. Worker needs ssm:GetParameter on /iac-ci/sops-keys/* to fetch the decryption key. Callback uses presigned URL (no additional AWS permissions needed).
@@ -359,25 +489,43 @@ No IAM role switching. Worker only operates with target account credentials from
 
 For orders with `execution_target: "ssm"`, the orchestrator sends an SSM Run Command instead of invoking Lambda or CodeBuild.
 
-```
-1. Orchestrator calls ssm:SendCommand with:
-   - DocumentName: order-level ssm_document_name OR default "iac-ci-run-commands"
-   - Targets: instance_ids or tag-based targeting from ssm_targets
-   - Parameters:
-       Commands:    JSON array of shell commands
-       CallbackUrl: presigned S3 PUT URL
-       Timeout:     order timeout in seconds
-       EnvVars:     JSON object of env vars (credentials included, plain text)
-       S3Location:  S3 URI for exec.zip (optional)
+```mermaid
+flowchart TB
+    Send["1. Orchestrator calls ssm:SendCommand<br><i>DocumentName · Targets · Parameters</i>"]
 
-2. SSM Document (iac-ci-run-commands) on target instance:
-   - Export env vars from EnvVars parameter
-   - Download and extract exec.zip from S3 (if provided)
-   - Execute commands sequentially
-   - Capture exit code + stdout/stderr
-   - PUT result.json to CallbackUrl (presigned URL)
+    subgraph Params["SSM Command Parameters"]
+        Doc["DocumentName<br><i>order-level or default iac-ci-run-commands</i>"]
+        Targets["Targets<br><i>instance_ids or tag-based</i>"]
+        CmdParams["Commands · CallbackUrl · Timeout<br><i>EnvVars (plain text) · S3Location</i>"]
+    end
 
-3. S3 event fires → orchestrator re-triggered
+    subgraph Instance["SSM Document on Target Instance"]
+        Export["Export env vars"]
+        Download["Download + extract exec.zip<br><i>(if provided)</i>"]
+        Exec["Execute commands sequentially"]
+        Cap["Capture exit code + stdout/stderr"]
+        Put["PUT result.json to CallbackUrl"]
+    end
+
+    S3Event["3. S3 event fires<br><i>→ orchestrator re-triggered</i>"]
+
+    Send --> Doc
+    Send --> Targets
+    Send --> CmdParams
+    CmdParams --> Export --> Download --> Exec --> Cap --> Put --> S3Event
+
+    style Send fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Doc fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Targets fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style CmdParams fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Export fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Download fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Exec fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Cap fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Put fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style S3Event fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Params fill:#1a1a2e,stroke:#eab308,color:#e2e8f0
+    style Instance fill:#1a1a2e,stroke:#06b6d4,color:#e2e8f0
 ```
 
 No SOPS. Credentials and env vars are passed directly as SSM command parameters. The SSM document handles env var export, command execution, and callback — same result.json contract as Lambda/CodeBuild workers.
@@ -388,20 +536,26 @@ No SOPS. Credentials and env vars are passed directly as SSM command parameters.
 
 Per-order Step Function started at dispatch time.
 
-```
-┌─────────────────────────┐
-│ Check: result.json      │
-│ exists in S3?           │←──┐
-│                         │   │
-│ YES → EXIT              │   │
-│                         │   │
-│ NO  → timeout exceeded? │   │
-│   YES → write           │   │
-│     result.json         │   │
-│     {status: timed_out} │   │
-│     → EXIT              │   │
-│   NO  → Wait 60s ───────┘   │
-└─────────────────────────────┘
+```mermaid
+flowchart TB
+    Check{"result.json<br>exists in S3?"}
+    ExitOK["EXIT<br><i>worker completed</i>"]
+    Timeout{"Timeout<br>exceeded?"}
+    WriteTimeout["Write result.json<br><i>status: timed_out</i>"]
+    ExitTimeout["EXIT<br><i>timed out</i>"]
+    Wait["Wait 60s"]
+
+    Check -- "Yes" --> ExitOK
+    Check -- "No" --> Timeout
+    Timeout -- "Yes" --> WriteTimeout --> ExitTimeout
+    Timeout -- "No" --> Wait --> Check
+
+    style Check fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style ExitOK fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Timeout fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style WriteTimeout fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
+    style ExitTimeout fill:#3d0a0a,stroke:#ef4444,color:#e2e8f0
+    style Wait fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 Timeout distributed to three places: SOPS env var (worker self-enforces), DynamoDB (record keeping), Step Function (safety net).
@@ -410,25 +564,33 @@ Timeout distributed to three places: SOPS env var (worker self-enforces), Dynamo
 
 ## Cross-Account Execution Model
 
-```
-Repackage step (init_job):
-  SSM/Secrets Manager → target account temp creds
-  + env_vars + presigned callback URL
-  → all encrypted via SOPS (age key) → packed into exec.zip
-  SOPS private key → SSM Parameter Store (SecureString)
-    /iac-ci/sops-keys/<run_id>/<order_num>
+```mermaid
+flowchart TB
+    subgraph Repackage["Repackage Step (init_job)"]
+        Fetch["Fetch from SSM / Secrets Manager<br><i>target account temp creds</i><br><i>+ env_vars + presigned callback URL</i>"]
+        Encrypt["Encrypt all via SOPS (age key)<br><i>→ packed into exec.zip</i>"]
+        Store["Store SOPS private key in SSM<br><i>/iac-ci/sops-keys/&lt;run_id&gt;/&lt;order_num&gt;</i><br><i>SecureString</i>"]
+    end
 
-Worker:
-  Fetch SOPS private key from SSM Parameter Store
-  Decrypt SOPS → env vars include:
-    AWS_ACCESS_KEY_ID     (target account)
-    AWS_SECRET_ACCESS_KEY (target account)
-    AWS_SESSION_TOKEN     (target account)
-    CALLBACK_URL          (presigned, no creds needed)
-    CUSTOM_VAR_1, etc.
+    subgraph Worker["Worker Execution"]
+        FetchKey["Fetch SOPS private key from SSM"]
+        Decrypt["Decrypt SOPS → env vars<br><i>AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY</i><br><i>AWS_SESSION_TOKEN · CALLBACK_URL</i><br><i>CUSTOM_VAR_1, etc.</i>"]
+        Run["Run cmds<br><i>operates as target account</i>"]
+        Callback["Callback via presigned URL<br><i>zero AWS context needed</i>"]
+    end
 
-  Run cmds → operates as target account
-  Callback → presigned URL, zero AWS context needed
+    Fetch --> Encrypt --> Store
+    Store --> FetchKey --> Decrypt --> Run --> Callback
+
+    style Fetch fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Encrypt fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style Store fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style FetchKey fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style Decrypt fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style Run fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Callback fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Repackage fill:#1a1a2e,stroke:#f97316,color:#e2e8f0
+    style Worker fill:#1a1a2e,stroke:#a855f7,color:#e2e8f0
 ```
 
 No dual-credential context switching. Worker has a single execution context.
@@ -439,37 +601,67 @@ No dual-credential context switching. Worker has a single execution context.
 
 ### Internal Bucket (1 day lifecycle)
 
-```
-s3://<internal-bucket>/
-└── tmp/
-    ├── exec/
-    │   └── <run_id>/
-    │       └── <order_num>/
-    │           └── exec.zip
-    │
-    └── callbacks/runs/
-        └── <run_id>/
-            ├── 0000/
-            │   └── result.json        (init trigger)
-            └── <order_num>/
-                └── result.json        (worker callback)
+```mermaid
+graph TB
+    Bucket["s3://internal-bucket/"]
+    Tmp["tmp/"]
+    Exec["exec/"]
+    Callbacks["callbacks/runs/"]
+    RunExec["&lt;run_id&gt;/&lt;order_num&gt;/"]
+    ExecZip["exec.zip"]
+    RunCb["&lt;run_id&gt;/"]
+    Init["0000/result.json<br><i>init trigger</i>"]
+    Worker["&lt;order_num&gt;/result.json<br><i>worker callback</i>"]
+
+    Bucket --> Tmp
+    Tmp --> Exec --> RunExec --> ExecZip
+    Tmp --> Callbacks --> RunCb
+    RunCb --> Init
+    RunCb --> Worker
+
+    style Bucket fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Tmp fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Exec fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Callbacks fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style RunExec fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style ExecZip fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style RunCb fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Init fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Worker fill:#3d1f00,stroke:#f97316,color:#e2e8f0
 ```
 
 ### Done Bucket (1 day lifecycle, separate for security)
 
-```
-s3://<done-bucket>/
-└── <run_id>/
-    └── done
+```mermaid
+graph LR
+    Bucket["s3://done-bucket/"]
+    Run["&lt;run_id&gt;/"]
+    Done["done"]
+
+    Bucket --> Run --> Done
+
+    style Bucket fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Run fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Done fill:#003d2b,stroke:#10b981,color:#e2e8f0
 ```
 
 ### State Bucket (permanent)
 
-```
-s3://<state-bucket>/
-├── ecr/terraform.tfstate
-├── deploy/terraform.tfstate
-└── archive/iac-ci-teardown-<sha>.zip
+```mermaid
+graph TB
+    Bucket["s3://state-bucket/<br><i>permanent</i>"]
+    ECR["ecr/terraform.tfstate"]
+    Deploy["deploy/terraform.tfstate"]
+    Archive["archive/iac-ci-teardown-&lt;sha&gt;.zip"]
+
+    Bucket --> ECR
+    Bucket --> Deploy
+    Bucket --> Archive
+
+    style Bucket fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style ECR fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Deploy fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Archive fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 ---
@@ -478,85 +670,123 @@ s3://<state-bucket>/
 
 ### Orders
 
-```
-PK: <run_id>:<order_num>
-TTL: 1 day
+```mermaid
+graph TB
+    Table["Orders Table<br><i>PK: &lt;run_id&gt;:&lt;order_num&gt; · TTL: 1 day</i>"]
+    Core["Core Fields<br><i>trace_id · flow_id · order_name · cmds</i><br><i>queue_id · s3_location · callback_url</i>"]
+    Exec["Execution Fields<br><i>execution_target · dependencies · status</i><br><i>timeout · must_succeed · git (b64)</i>"]
+    SSMFields["SSM-Only Fields<br><i>ssm_targets · ssm_document_name</i><br><i>env_dict (plain credentials)</i>"]
 
-Fields: trace_id, flow_id, order_name, cmds, queue_id,
-s3_location, callback_url, execution_target, git (b64),
-dependencies, status, created_at, last_update, timeout,
-must_succeed, execution_url, step_function_url,
-ssm_targets (SSM only), ssm_document_name (SSM only),
-env_dict (SSM only, plain credentials)
+    Table --> Core
+    Table --> Exec
+    Table --> SSMFields
+
+    style Table fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Core fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style Exec fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style SSMFields fill:#3d2b00,stroke:#eab308,color:#e2e8f0
 ```
 
 ### Order Events
 
-```
-PK: trace_id
-SK: order_name:epoch
-TTL: 90 days
+```mermaid
+graph TB
+    Table["Order Events Table<br><i>PK: trace_id · SK: order_name:epoch</i><br><i>TTL: 90 days</i>"]
+    GSI["GSI<br><i>PK: order_name · SK: epoch</i>"]
 
-GSI PK: order_name
-GSI SK: epoch
+    subgraph Examples["Event Examples"]
+        OrderEvent["Order-level<br><i>deploy-vpc:1708099200 → dispatched</i><br><i>deploy-vpc:1708099240 → succeeded</i>"]
+        JobEvent["Job-level (reserved: _job)<br><i>_job:1708099100 → job_started</i><br><i>_job:1708099300 → job_completed</i>"]
+    end
 
-Order-level events:
-  trace_id | deploy-vpc:1708099200 | dispatched
-  trace_id | deploy-vpc:1708099240 | succeeded
+    Table --> GSI
+    Table --> OrderEvent
+    Table --> JobEvent
 
-Job-level events (reserved name "_job"):
-  trace_id | _job:1708099100 | job_started
-  trace_id | _job:1708099300 | job_completed
+    style Table fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style GSI fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style OrderEvent fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style JobEvent fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style Examples fill:#1a1a2e,stroke:#06b6d4,color:#e2e8f0
 ```
 
 ### Orchestrator Locks
 
-```
-PK: lock:<run_id>
-TTL: max_timeout
+```mermaid
+graph LR
+    Table["Orchestrator Locks Table<br><i>PK: lock:&lt;run_id&gt; · TTL: max_timeout</i>"]
+    Fields["Fields<br><i>orchestrator_id · status (active/completed)</i><br><i>acquired_at · flow_id · trace_id</i>"]
 
-Fields: orchestrator_id, status (active/completed),
-acquired_at, flow_id, trace_id
+    Table --> Fields
+
+    style Table fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style Fields fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
 ```
 
 ---
 
 ## Tracing
 
-```
-trace_id format: <trace_id>:<epoch_time>
-  - Same trace_id across entire run
-  - New epoch per significant leg
+```mermaid
+graph TB
+    subgraph Format["Trace & Flow ID Formats"]
+        TraceID["trace_id format<br><i>&lt;trace_id&gt;:&lt;epoch_time&gt;</i><br><i>same trace_id across entire run</i><br><i>new epoch per significant leg</i>"]
+        FlowID["flow_id format<br><i>&lt;username&gt;:&lt;trace_id&gt;-&lt;flow_label&gt;</i><br><i>flow_label defaults to exec</i><br><i>stored in DynamoDB, PR comments, scheduler</i>"]
+    end
 
-flow_id format: <username>:<trace_id>-<flow_label>
-  - flow_label provided by caller or defaults to "exec"
-  - Stored in DynamoDB, PR comments, passed to scheduler
+    subgraph Trace["Example Trace Across Legs (a3f7b2c1)"]
+        T1[":1708099200<br><i>validation</i>"]
+        T2[":1708099203<br><i>repackage</i>"]
+        T3[":1708099207<br><i>upload</i>"]
+        T4[":1708099208<br><i>insert</i>"]
+        T5[":1708099209<br><i>pr_comment</i>"]
+        T6[":1708099210<br><i>dispatch</i>"]
+        T7[":1708099240<br><i>orch_read</i>"]
+        T8[":1708099242<br><i>orch_dispatch</i>"]
+        T9[":1708099300<br><i>finalize</i>"]
+    end
 
-Example trace across legs:
-  a3f7b2c1:1708099200  (validation)
-  a3f7b2c1:1708099203  (repackage)
-  a3f7b2c1:1708099207  (upload)
-  a3f7b2c1:1708099208  (insert)
-  a3f7b2c1:1708099209  (pr_comment)
-  a3f7b2c1:1708099210  (dispatch)
-  a3f7b2c1:1708099240  (orch_read)
-  a3f7b2c1:1708099241  (orch_eval)
-  a3f7b2c1:1708099242  (orch_dispatch)
-  a3f7b2c1:1708099300  (finalize)
+    T1 --> T2 --> T3 --> T4 --> T5 --> T6 --> T7 --> T8 --> T9
+
+    style TraceID fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style FlowID fill:#2d1052,stroke:#a855f7,color:#e2e8f0
+    style T1 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style T2 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style T3 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style T4 fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style T5 fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style T6 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style T7 fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style T8 fill:#3d1f00,stroke:#f97316,color:#e2e8f0
+    style T9 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style Format fill:#1a1a2e,stroke:#06b6d4,color:#e2e8f0
+    style Trace fill:#1a1a2e,stroke:#f97316,color:#e2e8f0
 ```
 
 ---
 
 ## TTL / Cleanup Strategy
 
-```
-Presigned URLs:        default 2 hours (configurable in job_params)
-Internal S3 bucket:    1 day lifecycle rule
-Done S3 bucket:        1 day lifecycle rule
-Orders table:          1 day DynamoDB TTL
-Orchestrator locks:    TTL = max_timeout of run
-Order events table:    90 day DynamoDB TTL (+ GSI for analytics)
-SOPS keys (SSM):       deleted on job finalization by orchestrator
+```mermaid
+graph TB
+    subgraph TTL["TTL / Cleanup Strategy"]
+        Presign["Presigned URLs<br><i>default 2 hours (configurable)</i>"]
+        IntS3["Internal S3 bucket<br><i>1 day lifecycle rule</i>"]
+        DoneS3["Done S3 bucket<br><i>1 day lifecycle rule</i>"]
+        OrdersTTL["Orders table<br><i>1 day DynamoDB TTL</i>"]
+        LocksTTL["Orchestrator locks<br><i>TTL = max_timeout of run</i>"]
+        EventsTTL["Order events table<br><i>90 day DynamoDB TTL (+ GSI)</i>"]
+        SOPSClean["SOPS keys (SSM)<br><i>deleted on job finalization</i>"]
+    end
+
+    style Presign fill:#0a3544,stroke:#06b6d4,color:#e2e8f0
+    style IntS3 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style DoneS3 fill:#003d2b,stroke:#10b981,color:#e2e8f0
+    style OrdersTTL fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style LocksTTL fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style EventsTTL fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
+    style SOPSClean fill:#3d2b00,stroke:#eab308,color:#e2e8f0
+    style TTL fill:#1a1a2e,stroke:#06b6d4,color:#e2e8f0
 ```
 
 Nothing runs 24/7. No manual cleanup required.
@@ -565,37 +795,37 @@ Nothing runs 24/7. No manual cleanup required.
 
 ## Event-Driven Wave Execution Example
 
-```
-Orders:
-  order-1: no deps
-  order-2: no deps
-  order-3: depends on [order-1, order-2]
+```mermaid
+sequenceDiagram
+    participant IJ as init_job
+    participant S3 as S3 (callbacks)
+    participant Orch as Orchestrator
+    participant O1 as order-1<br>(no deps)
+    participant O2 as order-2<br>(no deps)
+    participant O3 as order-3<br>(deps: 1, 2)
 
-Timeline:
+    IJ->>S3: Write .../0000/result.json
+    S3-->>Orch: S3 event
+    Note over Orch: Acquire lock<br>Dispatch wave 1
 
-init_job writes .../0000/result.json
-  → S3 event → orchestrator
-  → dispatches order-1, order-2 (parallel)
-  → releases lock
+    par Wave 1
+        Orch->>O1: Dispatch order-1
+        Orch->>O2: Dispatch order-2
+    end
+    Note over Orch: Release lock
 
-order-1 finishes, writes result.json
-  → S3 event → orchestrator
-  → acquires lock
-  → order-3 deps: order-1 ✅, order-2 still running
-  → nothing to dispatch
-  → releases lock
+    O1->>S3: Write result.json (succeeded)
+    S3-->>Orch: S3 event
+    Note over Orch: Acquire lock<br>order-3 deps: order-1 ✅, order-2 running<br>Nothing to dispatch<br>Release lock
 
-order-2 finishes, writes result.json
-  → S3 event → orchestrator
-  → acquires lock
-  → order-3 deps: order-1 ✅, order-2 ✅
-  → dispatches order-3
-  → releases lock
+    O2->>S3: Write result.json (succeeded)
+    S3-->>Orch: S3 event
+    Note over Orch: Acquire lock<br>order-3 deps: order-1 ✅, order-2 ✅
 
-order-3 finishes, writes result.json
-  → S3 event → orchestrator
-  → acquires lock
-  → all done → finalize
-  → write done endpoint
-  → release lock
+    Orch->>O3: Dispatch order-3 (wave 2)
+    Note over Orch: Release lock
+
+    O3->>S3: Write result.json (succeeded)
+    S3-->>Orch: S3 event
+    Note over Orch: Acquire lock<br>All done → finalize<br>Write done endpoint<br>Release lock
 ```
