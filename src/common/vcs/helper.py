@@ -22,7 +22,7 @@ class VcsHelper:
 
     Responsibilities:
     - Factory: instantiate the right provider via provider="github" etc.
-    - Delegates raw VCS operations (create/update/delete/verify) to the provider.
+    - Delegates raw VCS operations (create/update/delete) to the provider.
     - Adds shared business logic that works across all providers:
       search_comments, upsert_comment, format_tags, has_tag_block_at_last_line.
 
@@ -47,9 +47,6 @@ class VcsHelper:
     # ------------------------------------------------------------------
     # Delegated provider operations
     # ------------------------------------------------------------------
-
-    def verify_webhook(self, headers: dict, body: bytes, secret: str) -> bool:
-        return self._provider.verify_webhook(headers, body, secret)
 
     def create_comment(self, repo: str, pr_number: int, body: str, token: str) -> int:
         return self._provider.create_comment(repo, pr_number, body, token)

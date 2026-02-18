@@ -12,11 +12,6 @@ class VcsProvider(ABC):
     """
 
     @abstractmethod
-    def verify_webhook(self, headers: dict, body: bytes, secret: str) -> bool:
-        """Verify webhook signature. Returns True if valid."""
-        ...
-
-    @abstractmethod
     def create_comment(self, repo: str, pr_number: int, body: str, token: str) -> int:
         """Create a comment on a PR. Returns comment_id."""
         ...

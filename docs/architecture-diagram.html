@@ -540,19 +540,19 @@
   <!-- ═══════════════════════════════════════ -->
   <div class="overview">
     <div class="overview-title">How It Works</div>
-    <div class="overview-subtitle">Jobs come in via webhook, execute on your AWS account, results go back to your PR</div>
+    <div class="overview-subtitle">Jobs come in via API, execute on your AWS account, results go back to your PR</div>
 
     <div class="simple-flow">
-      <!-- VCS / Webhook -->
+      <!-- Caller -->
       <div class="sf-node">
         <div class="sf-box blue">
-          <div class="sf-box-label">VCS / Webhook</div>
+          <div class="sf-box-label">Caller</div>
           <div class="sf-box-desc">
             Sends job payload<br>
-            (PR event, API call)
+            (SigV4 + JWT)
           </div>
         </div>
-        <span class="sf-who external">External trigger</span>
+        <span class="sf-who external">External caller</span>
       </div>
 
       <!-- Arrow 1 -->
@@ -562,7 +562,7 @@
           <span class="head">&#9656;</span>
         </div>
         <div class="sf-arrow-text">
-          POST /webhook<br>
+          POST /init<br>
           job payload
         </div>
       </div>
@@ -644,8 +644,8 @@
             <span class="component-icon icon-apigw">APIGW</span>
             <div class="component-name">API Gateway</div>
             <div class="component-detail">
-              iac-ci-webhook<br>
-              POST /webhook<br>
+              iac-ci-api<br>
+              POST /init, POST /ssm<br>
               HTTP API, auto-deploy
             </div>
           </div>
@@ -838,8 +838,8 @@
       <div class="flow-step flow-blue">
         <div class="step-line"><div class="step-dot"></div><div class="step-connector"></div></div>
         <div class="step-content">
-          <div class="step-label">1 &rsaquo; VCS webhook &rarr; API Gateway</div>
-          <div class="step-desc">POST /webhook with job payload containing orders, dependencies, and target account info</div>
+          <div class="step-label">1 &rsaquo; Caller &rarr; API Gateway</div>
+          <div class="step-desc">POST /init with job payload containing orders, dependencies, and target account info</div>
           <span class="step-tag tag-event">APIGW</span>
         </div>
       </div>

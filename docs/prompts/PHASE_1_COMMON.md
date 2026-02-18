@@ -122,7 +122,6 @@ Create src/common/vcs/__init__.py (empty).
 Create src/common/vcs/base.py:
 
 ABC class VcsProvider with abstract methods:
-- verify_webhook(headers, body, secret): return bool
 - create_comment(repo, pr_number, body, token): return comment_id
 - update_comment(repo, comment_id, body, token): return bool
 - find_comment_by_tag(repo, pr_number, tag, token): return comment_id or None
@@ -131,7 +130,6 @@ ABC class VcsProvider with abstract methods:
 Create src/common/vcs/github.py:
 
 GitHubProvider(VcsProvider) implementation:
-- verify_webhook: HMAC-SHA256 verification of X-Hub-Signature-256
 - create_comment: POST to GitHub REST API /repos/{repo}/issues/{pr_number}/comments
 - update_comment: PATCH to /repos/{repo}/issues/comments/{comment_id}
 - find_comment_by_tag: GET all comments, search for tag string in body
@@ -156,7 +154,7 @@ Create unit tests in tests/unit/ for all common modules:
 - test_dynamodb.py: use moto to mock DynamoDB. Test all CRUD operations, conditional lock acquire/release, TTL fields
 - test_s3.py: use moto to mock S3. Test upload, presigned URL generation, read/write result.json, init trigger, done endpoint
 - test_sops.py: mock subprocess calls to sops/age-keygen. Test encrypt/decrypt round-trip, repackage_order file layout
-- test_vcs_github.py: use responses library to mock GitHub API. Test webhook verification, CRUD on comments, find_comment_by_tag with pagination
+- test_vcs_github.py: use responses library to mock GitHub API. Test CRUD on comments, find_comment_by_tag with pagination
 
 Use pytest. Each test file should be independent. Use fixtures for common setup.
 ```

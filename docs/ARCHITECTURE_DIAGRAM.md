@@ -8,11 +8,11 @@ Visual overview of the iac-ci system. For an interactive version with full detai
 
 ```mermaid
 flowchart LR
-    VCS["VCS / Webhook<br><i>PR event or API call</i>"]
+    VCS["Caller<br><i>SigV4 + JWT</i>"]
     AWS["Your AWS Account<br><i>Validates, queues, executes</i>"]
     Results["Results<br><i>PR comment + logs</i>"]
 
-    VCS -- "POST /webhook<br>job payload" --> AWS
+    VCS -- "POST /init<br>job payload" --> AWS
     AWS -- "PR comment<br>+ status update" --> Results
 
     style VCS fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
@@ -29,11 +29,11 @@ flowchart LR
 
 ## Part 1: init_job
 
-Webhook intake -- validates, packages, and queues orders.
+Job intake -- validates, packages, and queues orders.
 
 ```mermaid
 sequenceDiagram
-    participant VCS as VCS / Webhook
+    participant VCS as Caller
     participant APIGW as API Gateway
     participant IJ as init_job Lambda
     participant SSM as SSM Parameter Store
@@ -41,7 +41,7 @@ sequenceDiagram
     participant DDB as DynamoDB
     participant PR as VCS PR
 
-    VCS->>APIGW: POST /webhook (job payload)
+    VCS->>APIGW: POST /init (job payload)
     APIGW->>IJ: Invoke (AWS_PROXY)
 
     Note over IJ: Validate orders<br>(cmds, timeout, code source)
@@ -115,7 +115,7 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph Ingress
-        APIGW["API Gateway<br><i>iac-ci-webhook</i><br>POST /webhook"]
+        APIGW["API Gateway<br><i>iac-ci-api</i><br>POST /init"]
         InitJob["init_job Lambda<br><i>300s · 512MB</i>"]
     end
 

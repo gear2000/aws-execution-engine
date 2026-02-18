@@ -75,7 +75,7 @@ main.tf:
 
 api_gateway.tf:
 - HTTP API (aws_apigatewayv2_api)
-- POST /webhook route → init_job Lambda integration
+- POST /init route → init_job Lambda integration
 - Stage: $default with auto_deploy
 
 lambdas.tf:

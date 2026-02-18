@@ -88,7 +88,7 @@ Generates:
       region       = <region>
 
 Creates:
-  - API Gateway (HTTP API, POST /webhook)
+  - API Gateway (HTTP API, POST /init, POST /ssm)
   - 4 Lambda functions (all ECR image, different entrypoints)
   - Step Function (watchdog state machine)
   - 3 DynamoDB tables (orders, order_events + GSI, locks)
@@ -102,7 +102,7 @@ Creates:
 
 ```
 Test 1: API Gateway health
-  curl POST <api_gw_url>/webhook
+  curl POST <api_gw_url>/init
   expect: 400 (no payload)
 
 Test 2: Lambda invoke

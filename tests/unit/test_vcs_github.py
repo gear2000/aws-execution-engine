@@ -1,7 +1,5 @@
 """Unit tests for src/common/vcs/github.py — GitHub provider layer."""
 
-import hashlib
-import hmac
 import json
 
 import pytest
@@ -13,31 +11,6 @@ from src.common.vcs.github import GitHubProvider, GITHUB_API_BASE
 @pytest.fixture
 def github():
     return GitHubProvider()
-
-
-# ---------------------------------------------------------------------------
-# Webhook verification
-# ---------------------------------------------------------------------------
-
-
-class TestVerifyWebhook:
-    def test_valid_signature(self, github):
-        secret = "mysecret"
-        body = b'{"action":"opened"}'
-        sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        headers = {"X-Hub-Signature-256": f"sha256={sig}"}
-        assert github.verify_webhook(headers, body, secret) is True
-
-    def test_invalid_signature(self, github):
-        headers = {"X-Hub-Signature-256": "sha256=invalid"}
-        assert github.verify_webhook(headers, b"body", "secret") is False
-
-    def test_missing_signature(self, github):
-        assert github.verify_webhook({}, b"body", "secret") is False
-
-    def test_wrong_prefix(self, github):
-        headers = {"X-Hub-Signature-256": "md5=abc"}
-        assert github.verify_webhook(headers, b"body", "secret") is False
 
 
 # ---------------------------------------------------------------------------

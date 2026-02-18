@@ -16,7 +16,7 @@ for var in API_GATEWAY_URL AWS_REGION ORDERS_TABLE ORDER_EVENTS_TABLE LOCKS_TABL
 done
 
 # 1. API Gateway responds (expect 4xx, not 5xx or connection error)
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_GATEWAY_URL}/webhook" 2>/dev/null || echo "000")
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_GATEWAY_URL}/init" 2>/dev/null || echo "000")
 if [[ "$HTTP_CODE" =~ ^4[0-9]{2}$ ]]; then
   pass "API Gateway responds (HTTP $HTTP_CODE)"
 else
@@ -24,7 +24,7 @@ else
 fi
 
 # 2-5. Lambda functions exist
-for FUNC in iac-ci-process-webhook iac-ci-orchestrator iac-ci-watchdog-check iac-ci-worker; do
+for FUNC in iac-ci-init-job iac-ci-orchestrator iac-ci-watchdog-check iac-ci-worker; do
   if aws lambda get-function --function-name "$FUNC" --region "$AWS_REGION" >/dev/null 2>&1; then
     pass "Lambda $FUNC exists"
   else

@@ -21,7 +21,7 @@ iac-ci/
 │   │   └── vcs/
 │   │       ├── __init__.py
 │   │       ├── base.py                # ABC interface for VCS providers
-│   │       └── github.py              # GitHub: PR comments, webhook verify
+│   │       └── github.py              # GitHub: PR comments
 │   │
 │   ├── init_job/                      # Part 1: init_job
 │   │   ├── __init__.py
@@ -78,7 +78,7 @@ iac-ci/
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
-│       ├── api_gateway.tf             # HTTP API + POST /webhook + POST /ssm
+│       ├── api_gateway.tf             # HTTP API + POST /init + POST /ssm
 │       ├── lambdas.tf                 # 5 Lambda functions (all ECR image)
 │       ├── step_functions.tf          # watchdog state machine
 │       ├── dynamodb.tf                # orders, order_events (+GSI), locks
@@ -185,7 +185,7 @@ flowchart TB
 | `sops.py` | Encrypt env_vars + creds into SOPS bundle, decrypt, auto-gen temp keys |
 | `code_source.py` | Shared code source operations: git clone, S3 fetch, credential retrieval (SSM/Secrets Manager), zip (extracted from init_job/repackage.py) |
 | `vcs/base.py` | ABC: create_comment, update_comment, find_comment_by_tag |
-| `vcs/github.py` | GitHub implementation + webhook signature verification |
+| `vcs/github.py` | GitHub implementation: PR comments, CRUD, pagination |
 
 ### src/init_job/
 

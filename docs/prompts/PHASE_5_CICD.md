@@ -216,7 +216,7 @@ Expects environment variables:
 - DONE_BUCKET
 
 Tests (each prints PASS/FAIL):
-1. API Gateway responds: curl -s -o /dev/null -w "%{http_code}" -X POST ${API_GATEWAY_URL}/webhook → expect 4xx (no payload is fine, just not 5xx or connection refused)
+1. API Gateway responds: curl -s -o /dev/null -w "%{http_code}" -X POST ${API_GATEWAY_URL}/init → expect 4xx (no payload is fine, just not 5xx or connection refused)
 2. init_job Lambda exists: aws lambda get-function --function-name iac-ci-init-job
 3. orchestrator Lambda exists: aws lambda get-function --function-name iac-ci-orchestrator
 4. watchdog_check Lambda exists: aws lambda get-function --function-name iac-ci-watchdog-check
