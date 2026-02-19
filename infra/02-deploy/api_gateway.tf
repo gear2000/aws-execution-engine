@@ -17,9 +17,10 @@ resource "aws_apigatewayv2_integration" "init_job" {
 }
 
 resource "aws_apigatewayv2_route" "post_init" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /init"
-  target    = "integrations/${aws_apigatewayv2_integration.init_job.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "POST /init"
+  target             = "integrations/${aws_apigatewayv2_integration.init_job.id}"
+  authorization_type = "AWS_IAM"
 }
 
 resource "aws_lambda_permission" "apigw_invoke" {
@@ -40,9 +41,10 @@ resource "aws_apigatewayv2_integration" "ssm_config" {
 }
 
 resource "aws_apigatewayv2_route" "post_ssm" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /ssm"
-  target    = "integrations/${aws_apigatewayv2_integration.ssm_config.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "POST /ssm"
+  target             = "integrations/${aws_apigatewayv2_integration.ssm_config.id}"
+  authorization_type = "AWS_IAM"
 }
 
 resource "aws_lambda_permission" "apigw_ssm_config" {
