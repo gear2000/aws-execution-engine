@@ -116,34 +116,6 @@ class TestOrder:
         assert restored.order_name == order.order_name
         assert restored.env_vars == order.env_vars
 
-    def test_from_dict_backward_compat_use_lambda_true(self):
-        data = {
-            "cmds": ["echo test"],
-            "timeout": 120,
-            "use_lambda": True,
-        }
-        order = Order.from_dict(data)
-        assert order.execution_target == "lambda"
-
-    def test_from_dict_backward_compat_use_lambda_false(self):
-        data = {
-            "cmds": ["echo test"],
-            "timeout": 120,
-            "use_lambda": False,
-        }
-        order = Order.from_dict(data)
-        assert order.execution_target == "codebuild"
-
-    def test_from_dict_execution_target_takes_precedence_over_use_lambda(self):
-        data = {
-            "cmds": ["echo test"],
-            "timeout": 120,
-            "execution_target": "ssm",
-            "use_lambda": True,
-        }
-        order = Order.from_dict(data)
-        assert order.execution_target == "ssm"
-
     def test_execution_target_ssm(self):
         order = Order(cmds=["echo"], timeout=300, execution_target="ssm")
         assert order.execution_target == "ssm"
@@ -430,46 +402,6 @@ class TestOrderRecord:
             cmds=["cmd1"],
             execution_target="ssm",
         )
-        assert record.execution_target == "ssm"
-
-    def test_from_dict_backward_compat_use_lambda_true(self):
-        data = {
-            "run_id": "run-1",
-            "order_num": "001",
-            "trace_id": "abc",
-            "flow_id": "user:abc-exec",
-            "order_name": "deploy",
-            "cmds": ["cmd1"],
-            "use_lambda": True,
-        }
-        record = OrderRecord.from_dict(data)
-        assert record.execution_target == "lambda"
-
-    def test_from_dict_backward_compat_use_lambda_false(self):
-        data = {
-            "run_id": "run-1",
-            "order_num": "001",
-            "trace_id": "abc",
-            "flow_id": "user:abc-exec",
-            "order_name": "deploy",
-            "cmds": ["cmd1"],
-            "use_lambda": False,
-        }
-        record = OrderRecord.from_dict(data)
-        assert record.execution_target == "codebuild"
-
-    def test_from_dict_execution_target_takes_precedence(self):
-        data = {
-            "run_id": "run-1",
-            "order_num": "001",
-            "trace_id": "abc",
-            "flow_id": "user:abc-exec",
-            "order_name": "deploy",
-            "cmds": ["cmd1"],
-            "execution_target": "ssm",
-            "use_lambda": True,
-        }
-        record = OrderRecord.from_dict(data)
         assert record.execution_target == "ssm"
 
     def test_ssm_targets_field(self):

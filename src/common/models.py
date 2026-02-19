@@ -1,4 +1,4 @@
-"""Data models for iac-ci."""
+"""Data models for aws-execution-engine."""
 
 import base64
 import json
@@ -50,10 +50,6 @@ class Order:
     def from_dict(cls, data: dict) -> "Order":
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
-        # Backward compat: translate legacy use_lambda to execution_target
-        if "use_lambda" in data and "execution_target" not in data:
-            filtered["execution_target"] = "lambda" if data["use_lambda"] else "codebuild"
-        filtered.pop("use_lambda", None)
         return cls(**filtered)
 
 
@@ -173,6 +169,7 @@ class OrderRecord:
     ssm_targets: Optional[Dict[str, Any]] = None
     ssm_document_name: Optional[str] = None
     env_dict: Optional[Dict[str, str]] = None
+    sops_key_ssm_path: Optional[str] = None
 
     @property
     def pk(self) -> str:
@@ -187,8 +184,4 @@ class OrderRecord:
     def from_dict(cls, data: dict) -> "OrderRecord":
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
-        # Backward compat: translate legacy use_lambda to execution_target
-        if "use_lambda" in data and "execution_target" not in data:
-            filtered["execution_target"] = "lambda" if data["use_lambda"] else "codebuild"
-        filtered.pop("use_lambda", None)
         return cls(**filtered)

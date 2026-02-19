@@ -8,6 +8,7 @@ from src.common import dynamodb, s3 as s3_ops
 from src.common.models import (
     Job, JOB_ORDER_NAME, SUCCEEDED, FAILED, TIMED_OUT, QUEUED, RUNNING,
 )
+from src.common.sops import delete_sops_key_ssm
 from src.orchestrator.lock import release_lock
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def check_and_finalize(
     Returns True if finalized, False if still in progress.
     """
     if not done_bucket:
-        done_bucket = os.environ.get("IAC_CI_DONE_BUCKET", "")
+        done_bucket = os.environ.get("AWS_EXE_SYS_DONE_BUCKET", "")
 
     # Check if all orders are terminal
     all_done = all(
@@ -91,6 +92,15 @@ def check_and_finalize(
         },
         dynamodb_resource=dynamodb_resource,
     )
+
+    # Clean up SOPS keys from SSM
+    for order in orders:
+        sops_key_ssm_path = order.get("sops_key_ssm_path")
+        if sops_key_ssm_path:
+            try:
+                delete_sops_key_ssm(sops_key_ssm_path)
+            except Exception as e:
+                logger.warning("Failed to delete SOPS key %s: %s", sops_key_ssm_path, e)
 
     # Write done endpoint
     s3_ops.write_done_endpoint(

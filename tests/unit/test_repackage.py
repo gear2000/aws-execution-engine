@@ -155,6 +155,9 @@ class TestGroupGitOrders:
 
 
 class TestRepackageOrders:
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.clone_repo")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -162,7 +165,8 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_repackage_produces_correct_structure(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_clone,
+        mock_ssm, mock_clone, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         with tempfile.TemporaryDirectory() as clone_dir:
             mock_clone.return_value = clone_dir
@@ -205,6 +209,9 @@ class TestRepackageOrders:
             assert call_kwargs["trace_id"] == "abc123"
             assert call_kwargs["ssm_values"] == {"DB_PASS": "secret"}
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.fetch_code_s3")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -212,7 +219,8 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_s3_code_source(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_s3,
+        mock_ssm, mock_s3, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         with tempfile.TemporaryDirectory() as code_dir:
             mock_s3.return_value = code_dir
@@ -239,6 +247,9 @@ class TestRepackageOrders:
             assert len(results) == 1
             mock_s3.assert_called_once_with("s3://bucket/code.zip")
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.clone_repo")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -246,7 +257,8 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_multiple_orders_same_repo_clones_once(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_clone,
+        mock_ssm, mock_clone, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         with tempfile.TemporaryDirectory() as clone_dir:
             mock_clone.return_value = clone_dir
@@ -283,6 +295,9 @@ class TestRepackageOrders:
             # KEY: only one clone despite two orders
             mock_clone.assert_called_once()
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.clone_repo")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -290,12 +305,13 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_different_repos_clone_separately(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_clone,
+        mock_ssm, mock_clone, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         created_dirs = []
 
-        def clone_side_effect(repo, token_location, commit_hash=None, ssh_key_location=None):
-            d = tempfile.mkdtemp(prefix="iac-ci-test-")
+        def clone_side_effect(repo, token=None, commit_hash=None, ssh_key_path=None):
+            d = tempfile.mkdtemp(prefix="aws-exe-sys-test-")
             with open(os.path.join(d, "main.tf"), "w") as f:
                 f.write(f"repo={repo}")
             created_dirs.append(d)
@@ -327,6 +343,9 @@ class TestRepackageOrders:
         for d in created_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.clone_repo")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -334,12 +353,13 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_same_repo_different_commits_clone_separately(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_clone,
+        mock_ssm, mock_clone, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         created_dirs = []
 
-        def clone_side_effect(repo, token_location, commit_hash=None, ssh_key_location=None):
-            d = tempfile.mkdtemp(prefix="iac-ci-test-")
+        def clone_side_effect(repo, token=None, commit_hash=None, ssh_key_path=None):
+            d = tempfile.mkdtemp(prefix="aws-exe-sys-test-")
             with open(os.path.join(d, "main.tf"), "w") as f:
                 f.write(f"commit={commit_hash}")
             created_dirs.append(d)
@@ -371,6 +391,9 @@ class TestRepackageOrders:
         for d in created_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run-1/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY-CONTENT", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.init_job.repackage.clone_repo")
     @patch("src.init_job.repackage.fetch_ssm_values")
     @patch("src.init_job.repackage.fetch_secret_values")
@@ -378,7 +401,8 @@ class TestRepackageOrders:
     @patch("src.init_job.repackage.OrderBundler")
     def test_job_level_commit_hash_groups_orders(
         self, MockBundler, mock_presign, mock_secrets,
-        mock_ssm, mock_clone,
+        mock_ssm, mock_clone, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm,
     ):
         with tempfile.TemporaryDirectory() as clone_dir:
             mock_clone.return_value = clone_dir

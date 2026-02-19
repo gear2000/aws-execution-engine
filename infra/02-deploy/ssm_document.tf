@@ -1,11 +1,11 @@
 resource "aws_ssm_document" "run_commands" {
-  name            = "iac-ci-run-commands"
+  name            = "${local.prefix}-run-commands"
   document_type   = "Command"
   document_format = "YAML"
 
   content = yamlencode({
     schemaVersion = "2.2"
-    description   = "iac-ci generic command runner — downloads code from S3, runs commands, sends callback"
+    description   = "${local.prefix} generic command runner — downloads code from S3, runs commands, sends callback"
     parameters = {
       Commands = {
         type        = "String"
@@ -41,7 +41,7 @@ resource "aws_ssm_document" "run_commands" {
             "#!/bin/bash",
             "set -o pipefail",
             "",
-            "WORK_DIR=$(mktemp -d /tmp/iac-ci-XXXXXX)",
+            "WORK_DIR=$(mktemp -d /tmp/${local.prefix}-XXXXXX)",
             "cd \"$WORK_DIR\"",
             "STATUS=succeeded",
             "LOG_FILE=$(mktemp)",

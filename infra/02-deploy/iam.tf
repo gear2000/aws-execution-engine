@@ -28,12 +28,12 @@ data "aws_iam_policy_document" "lambda_logs" {
 # ============================================================
 
 resource "aws_iam_role" "init_job" {
-  name               = "iac-ci-init-job"
+  name               = "${local.prefix}-init-job"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy" "init_job" {
-  name = "iac-ci-init-job"
+  name = "${local.prefix}-init-job"
   role = aws_iam_role.init_job.id
 
   policy = jsonencode({
@@ -44,6 +44,7 @@ resource "aws_iam_role_policy" "init_job" {
         Action = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query"]
         Resource = [
           aws_dynamodb_table.orders.arn,
+          "${aws_dynamodb_table.orders.arn}/index/*",
           aws_dynamodb_table.order_events.arn,
           "${aws_dynamodb_table.order_events.arn}/index/*",
         ]
@@ -60,13 +61,13 @@ resource "aws_iam_role_policy" "init_job" {
       },
       {
         Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:*"
+        Action   = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${local.prefix}/sops-keys/*"
       },
       {
         Effect   = "Allow"
-        Action   = ["lambda:InvokeFunction"]
-        Resource = "arn:aws:lambda:${local.region}:${local.account_id}:function:iac-ci-*"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:*"
       },
     ]
   })
@@ -83,12 +84,12 @@ resource "aws_iam_role_policy" "init_job_logs" {
 # ============================================================
 
 resource "aws_iam_role" "orchestrator" {
-  name               = "iac-ci-orchestrator"
+  name               = "${local.prefix}-orchestrator"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy" "orchestrator" {
-  name = "iac-ci-orchestrator"
+  name = "${local.prefix}-orchestrator"
   role = aws_iam_role.orchestrator.id
 
   policy = jsonencode({
@@ -105,6 +106,7 @@ resource "aws_iam_role_policy" "orchestrator" {
         ]
         Resource = [
           aws_dynamodb_table.orders.arn,
+          "${aws_dynamodb_table.orders.arn}/index/*",
           aws_dynamodb_table.order_events.arn,
           "${aws_dynamodb_table.order_events.arn}/index/*",
           aws_dynamodb_table.orchestrator_locks.arn,
@@ -141,6 +143,11 @@ resource "aws_iam_role_policy" "orchestrator" {
           "arn:aws:ec2:${local.region}:${local.account_id}:instance/*",
         ]
       },
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:DeleteParameter"]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${local.prefix}/sops-keys/*"
+      },
     ]
   })
 }
@@ -156,12 +163,12 @@ resource "aws_iam_role_policy" "orchestrator_logs" {
 # ============================================================
 
 resource "aws_iam_role" "watchdog_check" {
-  name               = "iac-ci-watchdog-check"
+  name               = "${local.prefix}-watchdog-check"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy" "watchdog_check" {
-  name = "iac-ci-watchdog-check"
+  name = "${local.prefix}-watchdog-check"
   role = aws_iam_role.watchdog_check.id
 
   policy = jsonencode({
@@ -187,12 +194,12 @@ resource "aws_iam_role_policy" "watchdog_check_logs" {
 # ============================================================
 
 resource "aws_iam_role" "worker" {
-  name               = "iac-ci-worker"
+  name               = "${local.prefix}-worker"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy" "worker" {
-  name = "iac-ci-worker"
+  name = "${local.prefix}-worker"
   role = aws_iam_role.worker.id
 
   policy = jsonencode({
@@ -207,6 +214,11 @@ resource "aws_iam_role_policy" "worker" {
         Effect   = "Allow"
         Action   = ["dynamodb:PutItem"]
         Resource = aws_dynamodb_table.order_events.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${local.prefix}/sops-keys/*"
       },
     ]
   })
@@ -223,7 +235,7 @@ resource "aws_iam_role_policy" "worker_logs" {
 # ============================================================
 
 resource "aws_iam_role" "codebuild" {
-  name = "iac-ci-codebuild"
+  name = "${local.prefix}-codebuild"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -240,7 +252,7 @@ resource "aws_iam_role" "codebuild" {
 }
 
 resource "aws_iam_role_policy" "codebuild" {
-  name = "iac-ci-codebuild"
+  name = "${local.prefix}-codebuild"
   role = aws_iam_role.codebuild.id
 
   policy = jsonencode({
@@ -275,6 +287,11 @@ resource "aws_iam_role_policy" "codebuild" {
         ]
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${local.prefix}/sops-keys/*"
+      },
     ]
   })
 }
@@ -284,12 +301,12 @@ resource "aws_iam_role_policy" "codebuild" {
 # ============================================================
 
 resource "aws_iam_role" "ssm_config" {
-  name               = "iac-ci-ssm-config"
+  name               = "${local.prefix}-ssm-config"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy" "ssm_config" {
-  name = "iac-ci-ssm-config"
+  name = "${local.prefix}-ssm-config"
   role = aws_iam_role.ssm_config.id
 
   policy = jsonencode({

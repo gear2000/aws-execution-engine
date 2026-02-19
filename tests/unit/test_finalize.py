@@ -16,10 +16,10 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "test-done")
 
 
 @pytest.fixture

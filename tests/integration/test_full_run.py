@@ -23,14 +23,14 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-order-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
-    monkeypatch.setenv("IAC_CI_DONE_BUCKET", "test-done")
-    monkeypatch.setenv("IAC_CI_WORKER_LAMBDA", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_CODEBUILD_PROJECT", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_WATCHDOG_SFN", "arn:aws:states:us-east-1:123456:stateMachine:iac-ci-watchdog")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-order-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("AWS_EXE_SYS_WORKER_LAMBDA", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_CODEBUILD_PROJECT", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_WATCHDOG_SFN", "arn:aws:states:us-east-1:123456:stateMachine:aws-exe-sys-watchdog")
 
 
 @pytest.fixture
@@ -42,7 +42,21 @@ def mock_aws_resources(aws_env):
         ddb.create_table(
             TableName="test-orders",
             KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "run_id", "AttributeType": "S"},
+                {"AttributeName": "order_num", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "run_id-order_num-index",
+                    "KeySchema": [
+                        {"AttributeName": "run_id", "KeyType": "HASH"},
+                        {"AttributeName": "order_num", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
         ddb.create_table(
@@ -107,12 +121,16 @@ def _write_result(s3, run_id, order_num, status="succeeded", log="done"):
 @pytest.mark.integration
 class TestFullRun:
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.orchestrator.dispatch._start_watchdog", return_value="arn:watchdog:exec")
     @patch("src.orchestrator.dispatch._dispatch_lambda", return_value="req-123")
     @patch("src.common.sops.repackage_order")
     @patch("src.init_job.pr_comment.VcsHelper")
     def test_three_order_dependency_chain(
         self, mock_vcs_cls, mock_sops, mock_dispatch, mock_watchdog,
+        mock_resolve_creds, mock_gen_key, mock_store_ssm,
         mock_aws_resources,
     ):
         """Full run: submit 3 orders, simulate completions, verify finalization.
@@ -131,15 +149,15 @@ class TestFullRun:
             orders=[
                 Order(
                     cmds=["echo 1"], timeout=300, order_name="order-1",
-                    s3_location="s3://source-bucket/code.zip", use_lambda=True,
+                    s3_location="s3://source-bucket/code.zip", execution_target="lambda",
                 ),
                 Order(
                     cmds=["echo 2"], timeout=300, order_name="order-2",
-                    s3_location="s3://source-bucket/code.zip", use_lambda=True,
+                    s3_location="s3://source-bucket/code.zip", execution_target="lambda",
                 ),
                 Order(
                     cmds=["echo 3"], timeout=300, order_name="order-3",
-                    s3_location="s3://source-bucket/code.zip", use_lambda=True,
+                    s3_location="s3://source-bucket/code.zip", execution_target="lambda",
                     dependencies=["0001", "0002"],
                 ),
             ],

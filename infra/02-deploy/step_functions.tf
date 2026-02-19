@@ -1,5 +1,5 @@
 resource "aws_sfn_state_machine" "watchdog" {
-  name     = "iac-ci-watchdog"
+  name     = "${local.prefix}-watchdog"
   role_arn = aws_iam_role.step_functions.arn
 
   definition = jsonencode({
@@ -35,7 +35,7 @@ resource "aws_sfn_state_machine" "watchdog" {
 }
 
 resource "aws_iam_role" "step_functions" {
-  name = "iac-ci-sfn-role"
+  name = "${local.prefix}-sfn-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -52,7 +52,7 @@ resource "aws_iam_role" "step_functions" {
 }
 
 resource "aws_iam_role_policy" "step_functions" {
-  name = "iac-ci-sfn-policy"
+  name = "${local.prefix}-sfn-policy"
   role = aws_iam_role.step_functions.id
 
   policy = jsonencode({

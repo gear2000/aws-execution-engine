@@ -23,14 +23,14 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-order-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
-    monkeypatch.setenv("IAC_CI_DONE_BUCKET", "test-done")
-    monkeypatch.setenv("IAC_CI_WORKER_LAMBDA", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_CODEBUILD_PROJECT", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_WATCHDOG_SFN", "arn:aws:states:us-east-1:123456:stateMachine:iac-ci-watchdog")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-order-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("AWS_EXE_SYS_WORKER_LAMBDA", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_CODEBUILD_PROJECT", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_WATCHDOG_SFN", "arn:aws:states:us-east-1:123456:stateMachine:aws-exe-sys-watchdog")
 
 
 def _s3_event(run_id: str, order_num: str) -> dict:
@@ -65,7 +65,7 @@ def _insert_order(ddb, run_id, order_num, order_name, status, deps=None,
         "queue_id": order_num,
         "dependencies": deps or [],
         "must_succeed": must_succeed,
-        "use_lambda": True,
+        "execution_target": "lambda",
         "s3_location": f"s3://test-internal/tmp/exec/{run_id}/{order_num}/exec.zip",
         "callback_url": f"https://presigned/{run_id}/{order_num}",
         "created_at": now,
@@ -94,7 +94,21 @@ def mock_aws_resources(aws_env):
         ddb.create_table(
             TableName="test-orders",
             KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "run_id", "AttributeType": "S"},
+                {"AttributeName": "order_num", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "run_id-order_num-index",
+                    "KeySchema": [
+                        {"AttributeName": "run_id", "KeyType": "HASH"},
+                        {"AttributeName": "order_num", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
         ddb.create_table(

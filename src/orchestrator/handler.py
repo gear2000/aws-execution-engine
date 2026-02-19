@@ -29,8 +29,8 @@ def _parse_run_id_from_s3_key(key: str) -> str:
 
 def execute_orders(run_id: str, dynamodb_resource=None, s3_client=None) -> dict:
     """Main orchestrator logic for a given run_id."""
-    internal_bucket = os.environ.get("IAC_CI_INTERNAL_BUCKET", "")
-    done_bucket = os.environ.get("IAC_CI_DONE_BUCKET", "")
+    internal_bucket = os.environ.get("AWS_EXE_SYS_INTERNAL_BUCKET", "")
+    done_bucket = os.environ.get("AWS_EXE_SYS_DONE_BUCKET", "")
 
     # Read state (updates running orders from S3 callbacks)
     orders = read_state(

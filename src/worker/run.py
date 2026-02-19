@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _download_and_extract(s3_location: str) -> str:
     """Download exec.zip from S3 and extract to temp directory."""
-    work_dir = tempfile.mkdtemp(prefix="iac-ci-worker-")
+    work_dir = tempfile.mkdtemp(prefix="aws-exe-sys-worker-")
 
     # Parse s3://bucket/key
     parts = s3_location.replace("s3://", "").split("/", 1)
@@ -44,12 +44,23 @@ def _decrypt_and_load_env(work_dir: str) -> dict:
     if not os.path.exists(encrypted_path):
         return {}
 
-    # SOPS_AGE_KEY should be set in environment by the caller
-    sops_key = os.environ.get("SOPS_AGE_KEY", "")
-    if not sops_key:
-        sops_key_file = os.environ.get("SOPS_AGE_KEY_FILE", "")
-        if sops_key_file:
-            sops_key = sops_key_file
+    # Primary: fetch SOPS key from SSM (set by init_job)
+    sops_key_ssm_path = os.environ.get("SOPS_KEY_SSM_PATH", "")
+    if sops_key_ssm_path:
+        from src.common.sops import fetch_sops_key_ssm
+        private_key_content = fetch_sops_key_ssm(sops_key_ssm_path)
+        # Write to temp file for SOPS CLI
+        key_file = tempfile.mktemp(suffix=".key")
+        with open(key_file, "w") as f:
+            f.write(private_key_content)
+        sops_key = key_file
+    else:
+        # Fallback: check env vars
+        sops_key = os.environ.get("SOPS_AGE_KEY", "")
+        if not sops_key:
+            sops_key_file = os.environ.get("SOPS_AGE_KEY_FILE", "")
+            if sops_key_file:
+                sops_key = sops_key_file
 
     if not sops_key:
         logger.warning("No SOPS key found, skipping decryption")
@@ -72,7 +83,7 @@ def _setup_events_dir(trace_id: str) -> str:
     """
     events_dir = f"/var/tmp/share/{trace_id}/events"
     os.makedirs(events_dir, exist_ok=True)
-    os.environ["IAC_CI_EVENTS_DIR"] = events_dir
+    os.environ["AWS_EXE_SYS_EVENTS_DIR"] = events_dir
     return events_dir
 
 
@@ -113,12 +124,11 @@ def _collect_and_write_events(
         event_type = data.pop("event_type", stem)
         status = data.pop("status", "info")
 
-        extra_fields = {}
+        meta_fields = {}
         if flow_id:
-            extra_fields["flow_id"] = flow_id
+            meta_fields["flow_id"] = flow_id
         if run_id:
-            extra_fields["run_id"] = run_id
-        extra_fields.update(data)
+            meta_fields["run_id"] = run_id
 
         try:
             dynamodb.put_event(
@@ -126,7 +136,8 @@ def _collect_and_write_events(
                 order_name=order_name,
                 event_type=event_type,
                 status=status,
-                extra_fields=extra_fields if extra_fields else None,
+                data=data if data else None,
+                extra_fields=meta_fields if meta_fields else None,
             )
             count += 1
         except Exception as e:

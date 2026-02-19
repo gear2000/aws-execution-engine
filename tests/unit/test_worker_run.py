@@ -85,7 +85,7 @@ class TestSetupEventsDir:
         with patch.dict(os.environ, {}, clear=False):
             trace_id = "test-trace-456"
             events_dir = _setup_events_dir(trace_id)
-            assert os.environ["IAC_CI_EVENTS_DIR"] == events_dir
+            assert os.environ["AWS_EXE_SYS_EVENTS_DIR"] == events_dir
             assert events_dir == f"/var/tmp/share/{trace_id}/events"
 
     def test_idempotent(self):
@@ -133,7 +133,7 @@ class TestCollectAndWriteEvents:
 
             call_args_1 = calls[1]
             assert call_args_1[1]["event_type"] == "tf_plan"
-            assert call_args_1[1]["extra_fields"]["message"] == "Plan: 3 to add"
+            assert call_args_1[1]["data"]["message"] == "Plan: 3 to add"
 
     @patch("src.worker.run.dynamodb.put_event")
     def test_empty_dir_no_calls(self, mock_put_event):
@@ -194,7 +194,7 @@ class TestCollectAndWriteEvents:
             call_kwargs = mock_put_event.call_args[1]
             assert call_kwargs["event_type"] == "custom_check"
             assert call_kwargs["status"] == "info"
-            assert call_kwargs["extra_fields"]["message"] == "all good"
+            assert call_kwargs["data"]["message"] == "all good"
 
     @patch("src.worker.run.dynamodb.put_event")
     def test_dynamodb_error_does_not_crash(self, mock_put_event):

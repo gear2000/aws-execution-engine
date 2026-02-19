@@ -8,7 +8,7 @@ import time
 from typing import Dict, List, Optional
 
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def put_order(
     dynamodb_resource=None,
 ) -> None:
     """Insert an order record into the orders table."""
-    table = _get_table("IAC_CI_ORDERS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_ORDERS_TABLE", dynamodb_resource)
     item = {
         "pk": f"{run_id}:{order_num}",
         "run_id": run_id,
@@ -87,7 +87,7 @@ def get_order(
     dynamodb_resource=None,
 ) -> Optional[dict]:
     """Get a single order by run_id and order_num."""
-    table = _get_table("IAC_CI_ORDERS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_ORDERS_TABLE", dynamodb_resource)
     response = table.get_item(Key={"pk": f"{run_id}:{order_num}"})
     return response.get("Item")
 
@@ -97,10 +97,11 @@ def get_all_orders(
     run_id: str,
     dynamodb_resource=None,
 ) -> List[dict]:
-    """Query all orders for a run_id using begins_with on pk."""
-    table = _get_table("IAC_CI_ORDERS_TABLE", dynamodb_resource)
-    response = table.scan(
-        FilterExpression=Attr("run_id").eq(run_id)
+    """Query all orders for a run_id using GSI."""
+    table = _get_table("AWS_EXE_SYS_ORDERS_TABLE", dynamodb_resource)
+    response = table.query(
+        IndexName="run_id-order_num-index",
+        KeyConditionExpression=Key("run_id").eq(run_id),
     )
     return response.get("Items", [])
 
@@ -114,7 +115,7 @@ def update_order_status(
     dynamodb_resource=None,
 ) -> None:
     """Update order status and last_update timestamp."""
-    table = _get_table("IAC_CI_ORDERS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_ORDERS_TABLE", dynamodb_resource)
     update_expr = "SET #status = :status, last_update = :last_update"
     expr_values = {
         ":status": status,
@@ -146,11 +147,17 @@ def put_event(
     order_name: str,
     event_type: str,
     status: str,
+    data: Optional[dict] = None,
     extra_fields: Optional[dict] = None,
     dynamodb_resource=None,
 ) -> None:
-    """Insert an event with current epoch as SK."""
-    table = _get_table("IAC_CI_ORDER_EVENTS_TABLE", dynamodb_resource)
+    """Insert an event with current epoch as SK.
+
+    Args:
+        data: Subprocess payload -- stored as nested map under "data" key.
+        extra_fields: Metadata fields (flow_id, run_id) -- stored at top level.
+    """
+    table = _get_table("AWS_EXE_SYS_ORDER_EVENTS_TABLE", dynamodb_resource)
     epoch = str(int(time.time()))
     sk = f"{order_name}:{epoch}"
     item = {
@@ -163,6 +170,8 @@ def put_event(
     }
     if extra_fields:
         item.update(extra_fields)
+    if data:
+        item["data"] = data
     table.put_item(Item=item)
 
 
@@ -173,7 +182,7 @@ def get_events(
     dynamodb_resource=None,
 ) -> List[dict]:
     """Query events for a trace_id, optional begins_with filter on SK."""
-    table = _get_table("IAC_CI_ORDER_EVENTS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_ORDER_EVENTS_TABLE", dynamodb_resource)
     if order_name_prefix:
         response = table.query(
             KeyConditionExpression=Key("trace_id").eq(trace_id)
@@ -193,7 +202,7 @@ def get_latest_event(
     dynamodb_resource=None,
 ) -> Optional[dict]:
     """Get the most recent event for an order."""
-    table = _get_table("IAC_CI_ORDER_EVENTS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_ORDER_EVENTS_TABLE", dynamodb_resource)
     response = table.query(
         KeyConditionExpression=Key("trace_id").eq(trace_id)
         & Key("sk").begins_with(f"{order_name}:"),
@@ -221,7 +230,7 @@ def acquire_lock(
     Succeeds if lock doesn't exist OR status is 'completed'.
     Returns True if lock acquired, False otherwise.
     """
-    table = _get_table("IAC_CI_LOCKS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_LOCKS_TABLE", dynamodb_resource)
     now = int(time.time())
     try:
         table.put_item(
@@ -248,7 +257,7 @@ def release_lock(
     dynamodb_resource=None,
 ) -> None:
     """Release a lock by updating status to completed."""
-    table = _get_table("IAC_CI_LOCKS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_LOCKS_TABLE", dynamodb_resource)
     table.update_item(
         Key={"pk": f"lock:{run_id}"},
         UpdateExpression="SET #status = :status",
@@ -263,6 +272,6 @@ def get_lock(
     dynamodb_resource=None,
 ) -> Optional[dict]:
     """Get the current lock record for a run_id."""
-    table = _get_table("IAC_CI_LOCKS_TABLE", dynamodb_resource)
+    table = _get_table("AWS_EXE_SYS_LOCKS_TABLE", dynamodb_resource)
     response = table.get_item(Key={"pk": f"lock:{run_id}"})
     return response.get("Item")

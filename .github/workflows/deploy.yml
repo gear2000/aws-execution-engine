@@ -139,12 +139,12 @@ jobs:
           TDEOF
 
           cd /tmp/teardown
-          zip -r /tmp/iac-ci-teardown-${{ github.sha }}.zip .
+          zip -r /tmp/aws-exe-sys-teardown-${{ github.sha }}.zip .
 
       - name: Upload teardown archive
         run: |
-          aws s3 cp /tmp/iac-ci-teardown-${{ github.sha }}.zip \
-            s3://${{ steps.bucket.outputs.name }}/archive/iac-ci-teardown-${{ github.sha }}.zip
+          aws s3 cp /tmp/aws-exe-sys-teardown-${{ github.sha }}.zip \
+            s3://${{ steps.bucket.outputs.name }}/archive/aws-exe-sys-teardown-${{ github.sha }}.zip
 
       - name: Summary
         run: |
@@ -152,4 +152,4 @@ jobs:
           echo "- API Gateway: ${{ steps.deploy.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- State Bucket: ${{ steps.bucket.outputs.name }}" >> $GITHUB_STEP_SUMMARY
           echo "- Image Tag: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Teardown archive: s3://${{ steps.bucket.outputs.name }}/archive/iac-ci-teardown-${{ github.sha }}.zip" >> $GITHUB_STEP_SUMMARY
+          echo "- Teardown archive: s3://${{ steps.bucket.outputs.name }}/archive/aws-exe-sys-teardown-${{ github.sha }}.zip" >> $GITHUB_STEP_SUMMARY

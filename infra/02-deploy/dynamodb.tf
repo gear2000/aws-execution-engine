@@ -1,11 +1,28 @@
 resource "aws_dynamodb_table" "orders" {
-  name         = "iac-ci-orders"
+  name         = "${local.prefix}-orders"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
 
   attribute {
     name = "pk"
     type = "S"
+  }
+
+  attribute {
+    name = "run_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "order_num"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "run_id-order_num-index"
+    hash_key        = "run_id"
+    range_key       = "order_num"
+    projection_type = "ALL"
   }
 
   ttl {
@@ -15,13 +32,13 @@ resource "aws_dynamodb_table" "orders" {
 }
 
 resource "aws_dynamodb_table" "order_events" {
-  name         = "iac-ci-order-events"
+  name         = "${local.prefix}-order-events"
   billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "pk"
+  hash_key     = "trace_id"
   range_key    = "sk"
 
   attribute {
-    name = "pk"
+    name = "trace_id"
     type = "S"
   }
 
@@ -54,7 +71,7 @@ resource "aws_dynamodb_table" "order_events" {
 }
 
 resource "aws_dynamodb_table" "orchestrator_locks" {
-  name         = "iac-ci-locks"
+  name         = "${local.prefix}-locks"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
 

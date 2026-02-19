@@ -16,10 +16,10 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
 
 
 @pytest.fixture
@@ -29,7 +29,21 @@ def aws_resources(aws_env):
         ddb.create_table(
             TableName="test-orders",
             KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "run_id", "AttributeType": "S"},
+                {"AttributeName": "order_num", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "run_id-order_num-index",
+                    "KeySchema": [
+                        {"AttributeName": "run_id", "KeyType": "HASH"},
+                        {"AttributeName": "order_num", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
         ddb.create_table(

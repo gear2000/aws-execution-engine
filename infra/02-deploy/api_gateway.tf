@@ -1,5 +1,5 @@
 resource "aws_apigatewayv2_api" "api" {
-  name          = "iac-ci-api"
+  name          = "${local.prefix}-api"
   protocol_type = "HTTP"
 }
 

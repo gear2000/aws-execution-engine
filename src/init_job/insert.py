@@ -64,6 +64,10 @@ def insert_orders(
         if git_b64:
             order_data["git_b64"] = git_b64
 
+        sops_key_ssm_path = order_info.get("sops_key_ssm_path")
+        if sops_key_ssm_path:
+            order_data["sops_key_ssm_path"] = sops_key_ssm_path
+
         dynamodb.put_order(
             run_id=run_id,
             order_num=order_num,

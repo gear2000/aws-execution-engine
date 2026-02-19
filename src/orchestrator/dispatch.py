@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 def _dispatch_lambda(order: dict, run_id: str, internal_bucket: str) -> str:
     """Invoke the worker Lambda for an order. Returns execution ARN/request ID."""
     lambda_client = boto3.client("lambda")
-    function_name = os.environ.get("IAC_CI_WORKER_LAMBDA", "iac-ci-worker")
+    function_name = os.environ["AWS_EXE_SYS_WORKER_LAMBDA"]
 
     payload = {
         "s3_location": order.get("s3_location", ""),
         "internal_bucket": internal_bucket,
     }
+    if order.get("sops_key_ssm_path"):
+        payload["sops_key_ssm_path"] = order["sops_key_ssm_path"]
 
     resp = lambda_client.invoke(
         FunctionName=function_name,
@@ -36,14 +38,20 @@ def _dispatch_lambda(order: dict, run_id: str, internal_bucket: str) -> str:
 def _dispatch_codebuild(order: dict, run_id: str, internal_bucket: str) -> str:
     """Start a CodeBuild project for an order. Returns build ID."""
     codebuild_client = boto3.client("codebuild")
-    project_name = os.environ.get("IAC_CI_CODEBUILD_PROJECT", "iac-ci-worker")
+    project_name = os.environ["AWS_EXE_SYS_CODEBUILD_PROJECT"]
+
+    env_overrides = [
+        {"name": "S3_LOCATION", "value": order.get("s3_location", ""), "type": "PLAINTEXT"},
+        {"name": "INTERNAL_BUCKET", "value": internal_bucket, "type": "PLAINTEXT"},
+    ]
+    if order.get("sops_key_ssm_path"):
+        env_overrides.append(
+            {"name": "SOPS_KEY_SSM_PATH", "value": order["sops_key_ssm_path"], "type": "PLAINTEXT"},
+        )
 
     resp = codebuild_client.start_build(
         projectName=project_name,
-        environmentVariablesOverride=[
-            {"name": "S3_LOCATION", "value": order.get("s3_location", ""), "type": "PLAINTEXT"},
-            {"name": "INTERNAL_BUCKET", "value": internal_bucket, "type": "PLAINTEXT"},
-        ],
+        environmentVariablesOverride=env_overrides,
     )
     return resp.get("build", {}).get("id", "")
 
@@ -51,9 +59,7 @@ def _dispatch_codebuild(order: dict, run_id: str, internal_bucket: str) -> str:
 def _dispatch_ssm(order: dict, run_id: str, internal_bucket: str) -> str:
     """Send SSM Run Command for an order. Returns command ID."""
     ssm_client = boto3.client("ssm")
-    document_name = order.get("ssm_document_name") or os.environ.get(
-        "IAC_CI_SSM_DOCUMENT", "iac-ci-run-commands"
-    )
+    document_name = order.get("ssm_document_name") or os.environ["AWS_EXE_SYS_SSM_DOCUMENT"]
 
     parameters = {
         "Commands": [json.dumps(order.get("cmds", []))],
@@ -74,7 +80,7 @@ def _dispatch_ssm(order: dict, run_id: str, internal_bucket: str) -> str:
         "DocumentName": document_name,
         "Parameters": parameters,
         "TimeoutSeconds": order.get("timeout", 300),
-        "Comment": f"iac-ci run_id={run_id} order={order.get('order_num', '')}",
+        "Comment": f"aws-exe-sys run_id={run_id} order={order.get('order_num', '')}",
     }
 
     if ssm_targets.get("instance_ids"):
@@ -96,7 +102,7 @@ def _start_watchdog(
 ) -> str:
     """Start the watchdog Step Function for timeout safety. Returns execution ARN."""
     sfn_client = boto3.client("stepfunctions")
-    state_machine_arn = os.environ.get("IAC_CI_WATCHDOG_SFN", "")
+    state_machine_arn = os.environ.get("AWS_EXE_SYS_WATCHDOG_SFN", "")
 
     order_num = order.get("order_num", "")
     timeout = order.get("timeout", 300)
@@ -129,10 +135,7 @@ def _dispatch_single(
     order_num = order.get("order_num", "")
     order_name = order.get("order_name", order_num)
 
-    # Determine execution target with backward compat
     execution_target = order.get("execution_target", "codebuild")
-    if "use_lambda" in order and "execution_target" not in order:
-        execution_target = "lambda" if order["use_lambda"] else "codebuild"
 
     # Dispatch to execution environment
     if execution_target == "lambda":
@@ -193,7 +196,7 @@ def dispatch_orders(
     Returns list of dispatch results.
     """
     if not internal_bucket:
-        internal_bucket = os.environ.get("IAC_CI_INTERNAL_BUCKET", "")
+        internal_bucket = os.environ.get("AWS_EXE_SYS_INTERNAL_BUCKET", "")
 
     if not ready_orders:
         return []

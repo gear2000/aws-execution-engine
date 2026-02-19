@@ -4,7 +4,10 @@ import json
 import os
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
+
+import boto3
 
 
 def _run_cmd(cmd: list, env: Optional[dict] = None) -> str:
@@ -20,18 +23,15 @@ def _run_cmd(cmd: list, env: Optional[dict] = None) -> str:
     return result.stdout
 
 
-def _generate_age_key() -> Tuple[str, str]:
+def _generate_age_key() -> Tuple[str, str, str]:
     """Generate a temporary age key pair.
 
-    Returns (public_key, secret_key_file_path).
+    Returns (public_key, private_key_content, secret_key_file_path).
     """
     key_file = tempfile.mktemp(suffix=".key")
-    output = _run_cmd(["age-keygen", "-o", key_file])
-    # age-keygen outputs public key to stderr in format: "# public key: age1..."
-    # Read the key file to get the secret key
+    _run_cmd(["age-keygen", "-o", key_file])
     with open(key_file, "r") as f:
         content = f.read()
-    # Extract public key from the comment line
     public_key = None
     for line in content.splitlines():
         if line.startswith("# public key:"):
@@ -39,7 +39,63 @@ def _generate_age_key() -> Tuple[str, str]:
             break
     if not public_key:
         raise RuntimeError("Failed to extract public key from age-keygen output")
-    return public_key, key_file
+    return public_key, content, key_file
+
+
+def store_sops_key_ssm(
+    run_id: str,
+    order_num: str,
+    private_key: str,
+    ttl_hours: int = 2,
+) -> str:
+    """Store SOPS age private key in SSM Parameter Store with auto-expiration.
+
+    Uses advanced tier to support parameter policies (expiration).
+    Returns the SSM parameter path.
+    """
+    ssm = boto3.client("ssm")
+    path = f"/aws-exe-sys/sops-keys/{run_id}/{order_num}"
+
+    expiration = (
+        datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    ssm.put_parameter(
+        Name=path,
+        Value=private_key,
+        Type="SecureString",
+        Tier="Advanced",
+        Policies=json.dumps([
+            {
+                "Type": "Expiration",
+                "Version": "1.0",
+                "Attributes": {
+                    "Timestamp": expiration,
+                },
+            }
+        ]),
+        Overwrite=True,
+    )
+    return path
+
+
+def fetch_sops_key_ssm(ssm_path: str) -> str:
+    """Fetch SOPS age private key from SSM Parameter Store.
+
+    Returns the private key string.
+    """
+    ssm = boto3.client("ssm")
+    resp = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
+    return resp["Parameter"]["Value"]
+
+
+def delete_sops_key_ssm(ssm_path: str) -> None:
+    """Delete SOPS age private key from SSM (cleanup after job completion)."""
+    ssm = boto3.client("ssm")
+    try:
+        ssm.delete_parameter(Name=ssm_path)
+    except ssm.exceptions.ParameterNotFound:
+        pass  # Already expired or deleted
 
 
 def encrypt_env(
@@ -59,7 +115,7 @@ def encrypt_env(
     encrypted_file = tempfile.mktemp(suffix=".enc.json")
 
     if sops_key is None:
-        public_key, key_file = _generate_age_key()
+        public_key, _private_key_content, key_file = _generate_age_key()
         sops_key = public_key
         env_extra = {"SOPS_AGE_KEY_FILE": key_file}
     else:

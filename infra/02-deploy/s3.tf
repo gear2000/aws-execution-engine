@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "internal" {
-  bucket        = "iac-ci-internal-${local.hash}"
+  bucket        = "${local.prefix}-internal-${local.hash}"
   force_destroy = true
 }
 
@@ -36,7 +36,7 @@ resource "aws_s3_bucket_public_access_block" "internal" {
 }
 
 resource "aws_s3_bucket" "done" {
-  bucket        = "iac-ci-done-${local.hash}"
+  bucket        = "${local.prefix}-done-${local.hash}"
   force_destroy = true
 }
 

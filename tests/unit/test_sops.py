@@ -29,7 +29,7 @@ class TestEncryptEnv:
     @patch("src.common.sops._generate_age_key")
     @patch("src.common.sops._run_cmd")
     def test_encrypt_auto_gen_key(self, mock_run_cmd, mock_gen_key):
-        mock_gen_key.return_value = ("age1publickey", "/tmp/test.key")
+        mock_gen_key.return_value = ("age1publickey", "AGE-SECRET-KEY-CONTENT", "/tmp/test.key")
         mock_run_cmd.return_value = ""
 
         encrypted_path, key_used = sops.encrypt_env({"KEY": "val"})

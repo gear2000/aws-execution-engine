@@ -1,5 +1,5 @@
 resource "aws_codebuild_project" "worker" {
-  name         = "iac-ci-worker"
+  name         = "${local.prefix}-worker"
   service_role = aws_iam_role.codebuild.arn
 
   artifacts {
@@ -14,27 +14,27 @@ resource "aws_codebuild_project" "worker" {
     image_pull_credentials_type = "SERVICE_ROLE"
 
     environment_variable {
-      name  = "IAC_CI_ORDERS_TABLE"
+      name  = "AWS_EXE_SYS_ORDERS_TABLE"
       value = aws_dynamodb_table.orders.name
     }
 
     environment_variable {
-      name  = "IAC_CI_ORDER_EVENTS_TABLE"
+      name  = "AWS_EXE_SYS_ORDER_EVENTS_TABLE"
       value = aws_dynamodb_table.order_events.name
     }
 
     environment_variable {
-      name  = "IAC_CI_LOCKS_TABLE"
+      name  = "AWS_EXE_SYS_LOCKS_TABLE"
       value = aws_dynamodb_table.orchestrator_locks.name
     }
 
     environment_variable {
-      name  = "IAC_CI_INTERNAL_BUCKET"
+      name  = "AWS_EXE_SYS_INTERNAL_BUCKET"
       value = aws_s3_bucket.internal.id
     }
 
     environment_variable {
-      name  = "IAC_CI_DONE_BUCKET"
+      name  = "AWS_EXE_SYS_DONE_BUCKET"
       value = aws_s3_bucket.done.id
     }
   }

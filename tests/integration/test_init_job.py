@@ -30,14 +30,14 @@ def _make_job(
                 timeout=300,
                 order_name="order-1",
                 s3_location=s3_location,
-                use_lambda=True,
+                execution_target="lambda",
             ),
             Order(
                 cmds=["echo order-2"],
                 timeout=300,
                 order_name="order-2",
                 s3_location=s3_location,
-                use_lambda=True,
+                execution_target="lambda",
             ),
         ]
     return Job(
@@ -57,11 +57,11 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-order-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
-    monkeypatch.setenv("IAC_CI_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-order-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "test-done")
 
 
 @pytest.fixture
@@ -75,7 +75,21 @@ def mock_aws_resources(aws_env):
         ddb.create_table(
             TableName="test-orders",
             KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "run_id", "AttributeType": "S"},
+                {"AttributeName": "order_num", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "run_id-order_num-index",
+                    "KeySchema": [
+                        {"AttributeName": "run_id", "KeyType": "HASH"},
+                        {"AttributeName": "order_num", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
         ddb.create_table(
@@ -120,10 +134,14 @@ def mock_aws_resources(aws_env):
 @pytest.mark.integration
 class TestInitJobFlow:
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.common.sops.repackage_order")
     @patch("src.init_job.pr_comment.VcsHelper")
     def test_full_init_job_creates_orders_and_trigger(
-        self, mock_vcs_cls, mock_sops, mock_aws_resources,
+        self, mock_vcs_cls, mock_sops, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm, mock_aws_resources,
     ):
         """End-to-end init_job: 2 orders, no PR, direct invoke."""
         # Mock SOPS to be a no-op (just return code_dir)
@@ -179,38 +197,36 @@ class TestInitJobFlow:
         assert len(job_events) >= 1
         assert job_events[0]["event_type"] == "job_started"
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.common.sops.repackage_order")
     @patch("src.init_job.pr_comment.VcsHelper")
-    def test_init_job_with_pr_comment(
-        self, mock_vcs_cls, mock_sops, mock_aws_resources,
+    def test_init_job_pr_comment_disabled(
+        self, mock_vcs_cls, mock_sops, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm, mock_aws_resources,
     ):
-        """Verify PR comment is created when pr_number is set."""
+        """PR comments are disabled (AC-5); init_pr_comment should be None."""
         mock_sops.side_effect = lambda code_dir, env, sops_key=None: code_dir
-
-        # Set up VCS mock — preserve real format_tags static method
-        from src.common.vcs.helper import VcsHelper as RealVcsHelper
-        mock_vcs = MagicMock()
-        mock_vcs_cls.return_value = mock_vcs
-        mock_vcs_cls.format_tags = RealVcsHelper.format_tags
-        mock_vcs.search_comments.return_value = []
-        mock_vcs.upsert_comment.return_value = {"comment_id": 42, "action": "created"}
 
         job = _make_job(pr_number=10)
         event = {"job_parameters_b64": job.to_b64()}
         result = handler(event)
 
         assert result["status"] == "ok"
-        assert result["init_pr_comment"] == 42
+        assert result["init_pr_comment"] is None
 
-        # Verify upsert_comment was called with correct PR number
-        mock_vcs.upsert_comment.assert_called_once()
-        call_args_str = str(mock_vcs.upsert_comment.call_args)
-        assert "10" in call_args_str
+        # VCS should never be instantiated (PR comments disabled)
+        mock_vcs_cls.assert_not_called()
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.common.sops.repackage_order")
     @patch("src.init_job.pr_comment.VcsHelper")
     def test_init_job_response_fields(
-        self, mock_vcs_cls, mock_sops, mock_aws_resources,
+        self, mock_vcs_cls, mock_sops, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm, mock_aws_resources,
     ):
         """Verify all expected response fields are present."""
         mock_sops.side_effect = lambda code_dir, env, sops_key=None: code_dir
@@ -225,10 +241,14 @@ class TestInitJobFlow:
         assert result["done_endpt"].startswith("s3://test-done/")
         assert result["pr_search_tag"]
 
+    @patch("src.init_job.repackage.store_sops_key_ssm", return_value="/aws-exe-sys/sops-keys/run/0001")
+    @patch("src.init_job.repackage._generate_age_key", return_value=("age1pubkey", "AGE-SECRET-KEY", "/tmp/mock.key"))
+    @patch("src.init_job.repackage.resolve_git_credentials", return_value=("mock-token", None))
     @patch("src.common.sops.repackage_order")
     @patch("src.init_job.pr_comment.VcsHelper")
     def test_init_job_via_apigw(
-        self, mock_vcs_cls, mock_sops, mock_aws_resources,
+        self, mock_vcs_cls, mock_sops, mock_resolve_creds,
+        mock_gen_key, mock_store_ssm, mock_aws_resources,
     ):
         """Verify API Gateway invocation returns proper response format."""
         mock_sops.side_effect = lambda code_dir, env, sops_key=None: code_dir

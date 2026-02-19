@@ -22,11 +22,12 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-order-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
-    monkeypatch.setenv("IAC_CI_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-order-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "test-done")
+    monkeypatch.setenv("SOPS_AGE_KEY", "AGE-SECRET-KEY-MOCK-FOR-TESTING")
 
 
 @pytest.fixture
@@ -68,7 +69,7 @@ class TestWorkerEvents:
     def test_subprocess_events_reach_dynamodb(
         self, mock_sops_decrypt, mock_callback, mock_aws_resources,
     ):
-        """A command writes a JSON event file to $IAC_CI_EVENTS_DIR.
+        """A command writes a JSON event file to $AWS_EXE_SYS_EVENTS_DIR.
         After execution, the worker reads it and writes to DynamoDB."""
 
         trace_id = "test-trace-events"
@@ -83,8 +84,8 @@ class TestWorkerEvents:
             "RUN_ID": "run-evt-1",
             "CALLBACK_URL": "https://callback.test",
             "CMDS": json.dumps([
-                # The subprocess writes a JSON event file to $IAC_CI_EVENTS_DIR
-                'echo \'{"event_type":"tf_plan","status":"succeeded","message":"Plan: 2 to add"}\' > $IAC_CI_EVENTS_DIR/tf_plan.json',
+                # The subprocess writes a JSON event file to $AWS_EXE_SYS_EVENTS_DIR
+                'echo \'{"event_type":"tf_plan","status":"succeeded","message":"Plan: 2 to add"}\' > $AWS_EXE_SYS_EVENTS_DIR/tf_plan.json',
             ]),
         }
 
@@ -119,7 +120,7 @@ class TestWorkerEvents:
         assert event["order_name"] == order_name
         assert event["event_type"] == "tf_plan"
         assert event["status"] == "succeeded"
-        assert event["message"] == "Plan: 2 to add"
+        assert event["data"]["message"] == "Plan: 2 to add"
         assert event["flow_id"] == "user:test-flow"
         assert event["run_id"] == "run-evt-1"
 

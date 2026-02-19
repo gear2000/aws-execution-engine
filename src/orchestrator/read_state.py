@@ -30,7 +30,7 @@ def read_state(
     Returns the full list of order records (updated).
     """
     if not internal_bucket:
-        internal_bucket = os.environ.get("IAC_CI_INTERNAL_BUCKET", "")
+        internal_bucket = os.environ.get("AWS_EXE_SYS_INTERNAL_BUCKET", "")
 
     orders = dynamodb.get_all_orders(run_id, dynamodb_resource=dynamodb_resource)
 

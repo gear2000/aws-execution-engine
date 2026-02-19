@@ -15,6 +15,7 @@ from src.common.code_source import (
     group_git_orders,
     fetch_code_s3,
     zip_directory,
+    resolve_git_credentials,
 )
 from src.common import s3 as s3_ops
 from src.ssm_config.models import SsmJob, SsmOrder
@@ -99,13 +100,18 @@ def repackage_ssm_orders(
         # Phase 1: Group git orders and clone once per unique (repo, commit_hash)
         git_groups, s3_indices = group_git_orders(job.orders, job)
 
+        # Resolve git credentials once for all clones
+        token, ssh_key_path = resolve_git_credentials(
+            token_location=job.git_token_location or "",
+            ssh_key_location=job.git_ssh_key_location,
+        )
+
         for (repo, commit_hash), order_entries in git_groups.items():
-            token_location = job.git_token_location or ""
             clone_dir = clone_repo(
                 repo=repo,
-                token_location=token_location,
+                token=token,
                 commit_hash=commit_hash,
-                ssh_key_location=job.git_ssh_key_location,
+                ssh_key_path=ssh_key_path,
             )
             shared_clone_dirs.append(clone_dir)
 
@@ -141,7 +147,7 @@ def repackage_ssm_orders(
         for i, order in enumerate(job.orders):
             if results[i] is not None:
                 continue
-            code_dir = tempfile.mkdtemp(prefix="iac-ci-ssm-")
+            code_dir = tempfile.mkdtemp(prefix="aws-exe-sys-ssm-")
             results[i] = _process_ssm_order(
                 job=job,
                 order=order,

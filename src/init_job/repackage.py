@@ -14,9 +14,11 @@ from src.common.code_source import (
     group_git_orders,
     fetch_code_s3,
     zip_directory,
+    resolve_git_credentials,
 )
 from src.common.models import Job, Order
 from src.common import s3 as s3_ops
+from src.common.sops import _generate_age_key, store_sops_key_ssm
 
 
 def _process_order(
@@ -45,6 +47,14 @@ def _process_order(
         expiry=job.presign_expiry,
     )
 
+    # Generate SOPS keypair if not provided, store private key in SSM
+    sops_key = order.sops_key
+    sops_key_ssm_path = None
+    if not sops_key:
+        public_key, private_key_content, _key_file = _generate_age_key()
+        sops_key = public_key
+        sops_key_ssm_path = store_sops_key_ssm(run_id, order_num, private_key_content)
+
     # Build and encrypt with OrderBundler
     bundler = OrderBundler(
         run_id=run_id,
@@ -57,7 +67,7 @@ def _process_order(
         secret_values=secret_values,
         callback_url=callback_url,
     )
-    bundler.repackage(code_dir, sops_key=order.sops_key)
+    bundler.repackage(code_dir, sops_key=sops_key)
 
     # Re-zip
     zip_path = os.path.join(tempfile.gettempdir(), f"{run_id}_{order_num}_exec.zip")
@@ -69,6 +79,7 @@ def _process_order(
         "zip_path": zip_path,
         "callback_url": callback_url,
         "code_dir": code_dir,
+        "sops_key_ssm_path": sops_key_ssm_path,
     }
 
 
@@ -93,12 +104,18 @@ def repackage_orders(
         # Phase 1: Group git orders and clone once per unique (repo, commit_hash)
         git_groups, s3_indices = group_git_orders(job.orders, job)
 
+        # Resolve git credentials once for all clones
+        token, ssh_key_path = resolve_git_credentials(
+            token_location=job.git_token_location,
+            ssh_key_location=job.git_ssh_key_location,
+        )
+
         for (repo, commit_hash), order_entries in git_groups.items():
             clone_dir = clone_repo(
                 repo=repo,
-                token_location=job.git_token_location,
+                token=token,
                 commit_hash=commit_hash,
-                ssh_key_location=job.git_ssh_key_location,
+                ssh_key_path=ssh_key_path,
             )
             shared_clone_dirs.append(clone_dir)
 

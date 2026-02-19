@@ -24,7 +24,7 @@ else
 fi
 
 # 2-5. Lambda functions exist
-for FUNC in iac-ci-init-job iac-ci-orchestrator iac-ci-watchdog-check iac-ci-worker; do
+for FUNC in aws-exe-sys-init-job aws-exe-sys-orchestrator aws-exe-sys-watchdog-check aws-exe-sys-worker; do
   if aws lambda get-function --function-name "$FUNC" --region "$AWS_REGION" >/dev/null 2>&1; then
     pass "Lambda $FUNC exists"
   else
@@ -53,10 +53,10 @@ for BUCKET_VAR in INTERNAL_BUCKET DONE_BUCKET; do
 done
 
 # 11. Step Function exists
-if aws stepfunctions list-state-machines --region "$AWS_REGION" 2>/dev/null | grep -q "iac-ci-watchdog"; then
-  pass "Step Function iac-ci-watchdog exists"
+if aws stepfunctions list-state-machines --region "$AWS_REGION" 2>/dev/null | grep -q "aws-exe-sys-watchdog"; then
+  pass "Step Function aws-exe-sys-watchdog exists"
 else
-  fail "Step Function iac-ci-watchdog not found"
+  fail "Step Function aws-exe-sys-watchdog not found"
 fi
 
 # 12. S3 notification configured on internal bucket

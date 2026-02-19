@@ -15,13 +15,13 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("IAC_CI_ORDERS_TABLE", "test-orders")
-    monkeypatch.setenv("IAC_CI_ORDER_EVENTS_TABLE", "test-events")
-    monkeypatch.setenv("IAC_CI_LOCKS_TABLE", "test-locks")
-    monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "test-internal")
-    monkeypatch.setenv("IAC_CI_WORKER_LAMBDA", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_CODEBUILD_PROJECT", "iac-ci-worker")
-    monkeypatch.setenv("IAC_CI_WATCHDOG_SFN", "arn:aws:states:us-east-1:123:stateMachine:watchdog")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDERS_TABLE", "test-orders")
+    monkeypatch.setenv("AWS_EXE_SYS_ORDER_EVENTS_TABLE", "test-events")
+    monkeypatch.setenv("AWS_EXE_SYS_LOCKS_TABLE", "test-locks")
+    monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "test-internal")
+    monkeypatch.setenv("AWS_EXE_SYS_WORKER_LAMBDA", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_CODEBUILD_PROJECT", "aws-exe-sys-worker")
+    monkeypatch.setenv("AWS_EXE_SYS_WATCHDOG_SFN", "arn:aws:states:us-east-1:123:stateMachine:watchdog")
 
 
 @pytest.fixture
@@ -140,59 +140,6 @@ class TestDispatchSingle:
         updated = dynamodb.get_order("run-1", "0001", dynamodb_resource=ddb_resource)
         assert updated["status"] == RUNNING
 
-    @patch("src.orchestrator.dispatch._start_watchdog")
-    @patch("src.orchestrator.dispatch._dispatch_lambda")
-    def test_backward_compat_use_lambda_true(self, mock_lambda, mock_watchdog, ddb_resource):
-        """Legacy use_lambda=True should route to Lambda dispatch."""
-        mock_lambda.return_value = "req-compat"
-        mock_watchdog.return_value = "arn:sfn:exec-compat"
-
-        dynamodb.put_order("run-1", "0001", {
-            "order_name": "test", "status": "queued",
-        }, dynamodb_resource=ddb_resource)
-
-        order = {
-            "order_num": "0001",
-            "order_name": "test",
-            "use_lambda": True,
-            "s3_location": "s3://bucket/exec.zip",
-            "timeout": 300,
-        }
-
-        result = _dispatch_single(
-            order, "run-1", "flow-1", "trace-1",
-            "test-internal", dynamodb_resource=ddb_resource,
-        )
-
-        assert result["execution_id"] == "req-compat"
-        mock_lambda.assert_called_once()
-
-    @patch("src.orchestrator.dispatch._start_watchdog")
-    @patch("src.orchestrator.dispatch._dispatch_codebuild")
-    def test_backward_compat_use_lambda_false(self, mock_cb, mock_watchdog, ddb_resource):
-        """Legacy use_lambda=False should route to CodeBuild dispatch."""
-        mock_cb.return_value = "build-compat"
-        mock_watchdog.return_value = "arn:sfn:exec-compat"
-
-        dynamodb.put_order("run-1", "0001", {
-            "order_name": "test", "status": "queued",
-        }, dynamodb_resource=ddb_resource)
-
-        order = {
-            "order_num": "0001",
-            "order_name": "test",
-            "use_lambda": False,
-            "s3_location": "s3://bucket/exec.zip",
-            "timeout": 300,
-        }
-
-        result = _dispatch_single(
-            order, "run-1", "flow-1", "trace-1",
-            "test-internal", dynamodb_resource=ddb_resource,
-        )
-
-        assert result["execution_id"] == "build-compat"
-        mock_cb.assert_called_once()
 
 
 class TestDispatchOrders:

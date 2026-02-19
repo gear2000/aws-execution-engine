@@ -40,7 +40,17 @@ def _normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 return json.loads(message)
             return message
 
-    # API Gateway: unwrap body (+ reject non-POST)
+    # API Gateway format 2.0: requestContext.http
+    if "requestContext" in event and "http" in event.get("requestContext", {}):
+        method = event["requestContext"]["http"].get("method", "")
+        if method != "POST":
+            return {"_apigw_error": f"Method {method} not allowed"}
+        body = event.get("body", "")
+        if isinstance(body, str):
+            return json.loads(body) if body else {}
+        return body if isinstance(body, dict) else {}
+
+    # API Gateway format 1.0: httpMethod
     if "httpMethod" in event:
         if event["httpMethod"] != "POST":
             return {"_apigw_error": f"Method {event['httpMethod']} not allowed"}
@@ -60,8 +70,8 @@ def process_job_and_insert_orders(
     done_endpt: str = "",
 ) -> dict:
     """Main processing function. Orchestrates the full init_job flow."""
-    internal_bucket = os.environ.get("IAC_CI_INTERNAL_BUCKET", "")
-    done_bucket = os.environ.get("IAC_CI_DONE_BUCKET", "")
+    internal_bucket = os.environ.get("AWS_EXE_SYS_INTERNAL_BUCKET", "")
+    done_bucket = os.environ.get("AWS_EXE_SYS_DONE_BUCKET", "")
 
     # Decode job parameters
     job = Job.from_b64(job_parameters_b64)
@@ -111,14 +121,9 @@ def process_job_and_insert_orders(
         internal_bucket=internal_bucket,
     )
 
-    # Step 5: PR comment
-    pr_comment_id = init_pr_comment(
-        job=job,
-        run_id=run_id,
-        flow_id=flow_id,
-        search_tag=search_tag,
-        repackaged_orders=repackaged,
-    )
+    # PR comments disabled — engine has no PR responsibility (AC-5).
+    # iac-ci owns entire PR comment lifecycle.
+    pr_comment_id = None
 
     # Step 6: Write init trigger to kick off orchestrator
     s3_ops.write_init_trigger(
@@ -148,7 +153,7 @@ def _apigw_response(status_code: int, body: dict) -> dict:
 
 def handler(event: Dict[str, Any], context: Any = None) -> dict:
     """Lambda entrypoint. Supports direct invoke, SNS, and API Gateway."""
-    is_apigw = "httpMethod" in event
+    is_apigw = "httpMethod" in event or ("requestContext" in event and "http" in event.get("requestContext", {}))
 
     try:
         payload = _normalize_event(event)

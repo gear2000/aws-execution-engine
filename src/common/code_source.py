@@ -37,38 +37,103 @@ def fetch_secret_values(paths: List[str], region: Optional[str] = None) -> Dict[
     return result
 
 
+def resolve_git_credentials(
+    token_location: str = "",
+    ssh_key_location: Optional[str] = None,
+    region: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
+    """Resolve git credential locations (SSM paths) to usable values.
+
+    Args:
+        token_location: SSM path containing git token
+        ssh_key_location: SSM path containing SSH private key
+
+    Returns (token, ssh_key_path) where ssh_key_path is a temp file if resolved.
+    """
+    token = ""
+    ssh_key_path = None
+
+    if token_location:
+        vals = fetch_ssm_values([token_location], region=region)
+        if vals:
+            token = list(vals.values())[0]
+
+    if ssh_key_location:
+        vals = fetch_ssm_values([ssh_key_location], region=region)
+        if vals:
+            key_content = list(vals.values())[0]
+            ssh_key_path = tempfile.mktemp(suffix=".key", prefix="aws-exe-sys-ssh-")
+            with open(ssh_key_path, "w") as f:
+                f.write(key_content)
+            os.chmod(ssh_key_path, 0o600)
+
+    return token, ssh_key_path
+
+
 def clone_repo(
     repo: str,
-    token_location: str,
+    token: str = "",
     commit_hash: Optional[str] = None,
-    ssh_key_location: Optional[str] = None,
+    ssh_key_path: Optional[str] = None,
 ) -> str:
-    """Clone a git repo and optionally checkout a specific commit.
+    """Clone a git repo. HTTPS+token is primary; SSH is fallback.
 
-    Returns the path to the repository root directory.
-    Uses --depth 1 for HEAD, --depth 2 when a specific commit_hash is requested.
+    Args:
+        repo: "org/repo" format
+        token: GitHub token for HTTPS auth
+        commit_hash: Optional specific commit to checkout
+        ssh_key_path: Optional local path to SSH private key (fallback)
     """
-    work_dir = tempfile.mkdtemp(prefix="iac-ci-git-")
-    clone_url = f"https://github.com/{repo}.git"
-
+    work_dir = tempfile.mkdtemp(prefix="aws-exe-sys-git-")
     depth = "2" if commit_hash else "1"
-    subprocess.run(
-        ["git", "clone", "--depth", depth, clone_url, work_dir],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+
+    # Primary: HTTPS with token
+    if token:
+        clone_url = f"https://x-access-token:{token}@github.com/{repo}.git"
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", depth, clone_url, work_dir],
+                check=True, capture_output=True, text=True,
+            )
+        except subprocess.CalledProcessError:
+            if ssh_key_path:
+                # Fallback: SSH
+                shutil.rmtree(work_dir, ignore_errors=True)
+                work_dir = tempfile.mkdtemp(prefix="aws-exe-sys-git-")
+                _clone_via_ssh(repo, ssh_key_path, work_dir, depth)
+            else:
+                raise
+    elif ssh_key_path:
+        # SSH only (no token available)
+        _clone_via_ssh(repo, ssh_key_path, work_dir, depth)
+    else:
+        # Public repo -- unauthenticated HTTPS
+        clone_url = f"https://github.com/{repo}.git"
+        subprocess.run(
+            ["git", "clone", "--depth", depth, clone_url, work_dir],
+            check=True, capture_output=True, text=True,
+        )
 
     if commit_hash:
         subprocess.run(
             ["git", "checkout", commit_hash],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=work_dir,
+            check=True, capture_output=True, text=True, cwd=work_dir,
         )
 
     return work_dir
+
+
+def _clone_via_ssh(repo: str, ssh_key_path: str, work_dir: str, depth: str) -> None:
+    """Clone via SSH with a specific key file."""
+    ssh_url = f"git@github.com:{repo}.git"
+    env = {
+        **os.environ,
+        "GIT_SSH_COMMAND": f"ssh -i {ssh_key_path} -o StrictHostKeyChecking=no",
+    }
+    subprocess.run(
+        ["git", "clone", "--depth", depth, ssh_url, work_dir],
+        check=True, capture_output=True, text=True, env=env,
+    )
 
 
 def extract_folder(clone_dir: str, folder: Optional[str] = None) -> str:
@@ -82,7 +147,7 @@ def extract_folder(clone_dir: str, folder: Optional[str] = None) -> str:
         raise FileNotFoundError(
             f"Folder '{folder}' not found in cloned repo at {clone_dir}"
         )
-    isolated_dir = tempfile.mkdtemp(prefix="iac-ci-order-")
+    isolated_dir = tempfile.mkdtemp(prefix="aws-exe-sys-order-")
     shutil.copytree(source, isolated_dir, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns(".git"))
     return isolated_dir
@@ -115,7 +180,7 @@ def group_git_orders(
 
 def fetch_code_s3(s3_location: str) -> str:
     """Download and extract a zip from S3. Returns path to extracted directory."""
-    work_dir = tempfile.mkdtemp(prefix="iac-ci-s3-")
+    work_dir = tempfile.mkdtemp(prefix="aws-exe-sys-s3-")
     # Parse s3://bucket/key
     parts = s3_location.replace("s3://", "").split("/", 1)
     bucket = parts[0]

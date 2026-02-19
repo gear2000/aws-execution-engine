@@ -16,7 +16,7 @@ provider "aws" {
 }
 
 resource "aws_ecr_repository" "iac_ci" {
-  name                 = "iac-ci"
+  name                 = "aws-exe-sys"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {

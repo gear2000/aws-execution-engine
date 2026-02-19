@@ -167,8 +167,8 @@ class TestProcessJobAndInsertOrders:
         self, mock_validate, mock_repackage, mock_upload,
         mock_insert, mock_pr, mock_trigger, monkeypatch,
     ):
-        monkeypatch.setenv("IAC_CI_INTERNAL_BUCKET", "internal")
-        monkeypatch.setenv("IAC_CI_DONE_BUCKET", "done")
+        monkeypatch.setenv("AWS_EXE_SYS_INTERNAL_BUCKET", "internal")
+        monkeypatch.setenv("AWS_EXE_SYS_DONE_BUCKET", "done")
 
         mock_validate.return_value = []
         mock_repackage.return_value = [
@@ -188,5 +188,5 @@ class TestProcessJobAndInsertOrders:
         mock_repackage.assert_called_once()
         mock_upload.assert_called_once()
         mock_insert.assert_called_once()
-        mock_pr.assert_called_once()
+        mock_pr.assert_not_called()  # PR comments disabled (AC-5)
         mock_trigger.assert_called_once()
